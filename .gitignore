@@ -1,0 +1,29 @@
+# ---- Python bytecode / build artifacts ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+
+# ---- Virtual environments (never commit these) ----
+.venv/
+venv/
+env/
+
+# ---- Django ----
+db.sqlite3
+db.sqlite3-journal
+media/
+*.log
+
+# ---- Secrets / local config ----
+.env
+.env.*
+*.env
+
+# ---- IDE ----
+.idea/
+*.swp

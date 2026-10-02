@@ -10,7 +10,7 @@ extensions = [
 ]
 
 setup(
-    name="BarkatPOS",
+    name="RestroPOS",
     ext_modules=cythonize(
         extensions,
         compiler_directives={"language_level": "3"},

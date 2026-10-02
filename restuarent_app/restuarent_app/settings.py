@@ -10,7 +10,7 @@ SECRET_KEY = 'replace-with-secure-key'
 DEBUG = True
 ALLOWED_HOSTS = ['*', '192.168.0.2']
 
-RESTAURANT_NAME = "Cafe Kunj"
+RESTAURANT_NAME = "RestroPOS"
 # Optionally:
 LOGO_PATH = os.path.join(BASE_DIR, "staticfiles", "images", "logo.png")
 
@@ -50,6 +50,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.app_branding',
             ],
         },
     },
@@ -73,7 +74,7 @@ AUTH_USER_MODEL = 'core.User'
 AUTH_PASSWORD_VALIDATORS = []
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'Asia/Karachi'
+TIME_ZONE = 'Africa/Lagos'
 USE_I18N = True
 USE_TZ = True
 

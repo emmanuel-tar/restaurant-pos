@@ -33,6 +33,16 @@ from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.http import JsonResponse 
 from .models import Customer
 
+from django.conf import settings as django_settings
+
+
+def _brand_name_bytes():
+    """App/restaurant name as ESC/POS-safe bytes, taken from settings.RESTAURANT_NAME."""
+    name = getattr(django_settings, 'RESTAURANT_NAME', 'RestroPOS')
+    # Thermal printers expect ASCII; drop anything they cannot print.
+    return name.encode('ascii', 'ignore')
+
+
 # Mixin to return JSON for AJAX forms
 class AjaxableResponseMixin:
     def is_ajax(self):
@@ -1351,7 +1361,7 @@ def build_bill_bytes(order, is_food_panda = "walk_in", copy = ""):
     lines.append(esc + b"\x61" + b"\x01")   # center
     # Company name
     lines.append(esc + b"\x21" + b"\x20")   # ESC ! 0x20 → double‐width
-    lines.append(b"Barkat Smart POS\n")
+    lines.append(_brand_name_bytes() + b"\n")
     lines.append(esc + b"\x21" + b"\x00")   # back to normal
 
     # Developer / tagline / contact

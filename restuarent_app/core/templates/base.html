@@ -331,7 +331,7 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="logo"><i class="fa fa-hamburger"></i> BarkatPOS</div>
+      <div class="logo"><i class="fa fa-hamburger"></i> {{ RESTAURANT_NAME }}</div>
       <div class="user-menu">
         <span>{{ request.user.username }}</span>
         <a href="{% url 'logout' %}"><i class="fa fa-sign-out-alt"></i></a>
