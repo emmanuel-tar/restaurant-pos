@@ -27,3 +27,13 @@ media/
 # ---- IDE ----
 .idea/
 *.swp
+
+# ---- Scratch / audit output (from smoke_test_*.py and url_audit.py) ----
+*_out.txt
+*_err.txt
+u2.txt
+u2err.txt
+chk.txt
+
+# ---- Stray fragment dir: accidental paste scraps, not a real app ----
+restuarant_app/
