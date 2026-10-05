@@ -1,4 +1,10 @@
-import win32print
+try:
+    # pywin32 is Windows-only. The rest of the app must still import on other
+    # platforms (Linux CI runners, a Linux server) - printing simply becomes a
+    # no-op there instead of crashing at import time.
+    import win32print
+except ImportError:  # pragma: no cover - non-Windows host
+    win32print = None
 
 # Default fallback printer
 DEFAULT_PRINTER_NAME = "POS80 Printer"
@@ -13,6 +19,11 @@ def send_to_printer(raw_bytes: bytes, printer_name: str = None) -> None:
 
     # Debugging: check your console to see which printer is being targeted
     print(f"DEBUG: Attempting to print to: {target_printer}") 
+
+    if win32print is None:
+        # Never fail the surrounding request because a host has no printer stack.
+        print(f"PRINTER SKIP on {target_printer}: pywin32 is unavailable on this platform")
+        return
 
     try:
         hprinter = win32print.OpenPrinter(target_printer)

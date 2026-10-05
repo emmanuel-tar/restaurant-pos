@@ -1,0 +1,21 @@
+# Minimal dependencies needed to run the app and its test suite.
+#
+# requirements.txt is a full environment dump (Jupyter, pandas, anaconda, ...)
+# and cannot be installed reliably on a CI runner. This file lists only what
+# the Django app itself imports:
+#
+#   Django            web framework            (settings.INSTALLED_APPS)
+#   crispy-forms      form rendering           (settings.INSTALLED_APPS)
+#   crispy-bootstrap5 Bootstrap 5 template pack (settings.INSTALLED_APPS)
+#   cryptography      license signature check   (core/license_check.py)
+#   Pillow            receipt/logo images       (core/escpos_printers.py)
+#
+# Deliberately NOT listed:
+#   pywin32   - Windows-only; core/printing.py and core/escpos_printers.py
+#               degrade to a no-op without it, so Linux CI can import the app.
+#   python-escpos / pdfkit / reportlab - optional or unused by the request path.
+Django==4.2.3
+django-crispy-forms==2.3
+crispy-bootstrap5==2026.3
+cryptography==41.0.2
+pillow==12.3.0

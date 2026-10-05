@@ -9,7 +9,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'restuarent_app.settings')
 
 import django
-django.setup()
+from django.apps import apps
+
+# Under `manage.py test` the app registry is already populated; only bootstrap
+# when this file is executed directly as a script.
+if not apps.ready:
+    django.setup()
 
 from django.db import transaction
 from core.models import User
@@ -27,7 +32,7 @@ def money(x):
 
 
 @transaction.atomic
-def run():
+def run(rollback=True, verbose=True):
     user = User.objects.first()
 
     cat = Category.objects.first() or Category.objects.create(name='SmokeCat')
@@ -522,21 +527,24 @@ def run():
     for marker in ('btn-hold', 'btn-recall', 'holds-drawer', 'parkCurrentBill',
                    'recallHold', 'totals-sticky'):
         checks.append((f'order screen has {marker}', marker in body, True, marker in body))
-    print('=' * 72)
-    failed = 0
-    for label, got, want, ok in checks:
-        flag = 'PASS' if ok else 'FAIL'
-        if not ok:
-            failed += 1
-        print(f'[{flag}] {label:<38} got={got}  expected={want}')
-    print('=' * 72)
-    print(f'{len(checks) - failed}/{len(checks)} checks passed')
-    print('-' * 72)
-    print('--- thermal bill (decoded) ---')
-    print(text)
+    if verbose:
+        print('=' * 72)
+        failed = 0
+        for label, got, want, ok in checks:
+            flag = 'PASS' if ok else 'FAIL'
+            if not ok:
+                failed += 1
+            print(f'[{flag}] {label:<38} got={got}  expected={want}')
+        print('=' * 72)
+        print(f'{len(checks) - failed}/{len(checks)} checks passed')
+        print('-' * 72)
+        print('--- thermal bill (decoded) ---')
+        print(text)
 
-    transaction.set_rollback(True)
-    return failed
+    if rollback:
+        transaction.set_rollback(True)
+    return checks
 
 
-sys.exit(1 if run() else 0)
+if __name__ == '__main__':
+    sys.exit(1 if any(not ok for *_, ok in run()) else 0)

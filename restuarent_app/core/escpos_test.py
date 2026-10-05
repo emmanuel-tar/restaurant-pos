@@ -1,6 +1,11 @@
 # core/escpos_test.py
 
-import win32print
+try:
+    # pywin32 is Windows-only; this view must still be importable elsewhere so
+    # the URLconf can load on a Linux CI runner.
+    import win32print
+except ImportError:  # pragma: no cover - non-Windows host
+    win32print = None
 from django.http import HttpResponse
 
 def simple_win32print_test(request):
@@ -9,6 +14,11 @@ def simple_win32print_test(request):
     exactly as it appears under Control Panel → Devices and Printers.
     Always returns an HttpResponse so Django doesn’t complain.
     """
+    if win32print is None:
+        return HttpResponse(
+            "Printing needs pywin32, which is only available on Windows.",
+            status=501,
+        )
 
     # 1) Change this to the exact name shown under Control Panel → Devices and Printers → Printer properties → General
     PRINTER_NAME = "KPOS_80 Printer"  # ← replace with your exact printer name

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: restuarent_app/requirements-ci.txt
+
+      - name: Install dependencies
+        run: pip install -r restuarent_app/requirements-ci.txt
+
+      - name: Django system check
+        working-directory: restuarent_app
+        run: python manage.py check
+
+      - name: Detect missing migrations
+        working-directory: restuarent_app
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Audit URL names
+        working-directory: restuarent_app
+        run: python url_audit.py
+
+      - name: Run test suite
+        working-directory: restuarent_app
+        run: python manage.py test --verbosity=2

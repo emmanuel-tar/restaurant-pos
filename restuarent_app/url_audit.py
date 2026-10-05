@@ -1,7 +1,11 @@
 """Verify every URL name referenced in code/templates resolves.
 
-Run with:  .venv\\Scripts\\python.exe url_audit.py
-Exits 1 when a referenced name is missing from the URLconf.
+Usable two ways:
+  * CLI   : .venv\\Scripts\\python.exe url_audit.py   (exits 1 on any miss)
+  * Tests : see core.tests.test_urls.UrlAuditTests
+
+The scan covers `reverse('name')`, `{% url 'name' %}`, `url 'name'` and the
+`'url_name': 'name'` entries used by navigation.py / permissions.py.
 """
 import os
 import re
@@ -10,61 +14,87 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'restuarent_app.settings')
 
+# Under `manage.py test` the app registry is already populated; only bootstrap
+# when this file is executed directly as a script.
 import django  # noqa: E402
+from django.apps import apps  # noqa: E402
 
-django.setup()
+if not apps.ready:
+    django.setup()
 
-from django.urls import get_resolver, NoReverseMatch, reverse  # noqa: E402
+APP_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'core')
 
-resolver = get_resolver()
-known = set(resolver.reverse_dict.keys())
-
-# Collect url_name / reverse('...') / {% url '...' %} references from the app
-# so the audit matches real usage.
-root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'core')
-used = set()
-pattern = re.compile(
+REFERENCE_PATTERN = re.compile(
     r"""(?:url_name['"]\s*:\s*['"]|reverse\(\s*['"]|{% url ['"]|url ['"])"""
     r"""([a-zA-Z0-9_]+)"""
 )
-for base, _dirs, files in os.walk(root):
-    if '__pycache__' in base:
-        continue
-    for fname in files:
-        if not fname.endswith(('.py', '.html')):
+
+
+def referenced_names(root=APP_ROOT):
+    """Every URL name referenced anywhere in the app's .py / .html sources."""
+    used = set()
+    for base, _dirs, files in os.walk(root):
+        if '__pycache__' in base:
             continue
-        path = os.path.join(base, fname)
+        for fname in files:
+            if not fname.endswith(('.py', '.html')):
+                continue
+            path = os.path.join(base, fname)
+            try:
+                with open(path, encoding='utf-8', errors='ignore') as fh:
+                    for match in REFERENCE_PATTERN.finditer(fh.read()):
+                        used.add(match.group(1))
+            except OSError:
+                continue
+    return used
+
+
+def audit():
+    """Return (referenced, known, missing, broken).
+
+    missing : referenced names with no matching route
+    broken  : (name, error) for routes that raise for reasons other than
+              needing positional args
+    """
+    from django.urls import NoReverseMatch, get_resolver, reverse
+
+    known = {name for name in get_resolver().reverse_dict.keys() if isinstance(name, str)}
+    used = referenced_names()
+
+    missing = sorted(used - known)
+
+    broken = []
+    for name in sorted(known):
+        if name.startswith('admin:'):
+            continue
         try:
-            with open(path, encoding='utf-8', errors='ignore') as fh:
-                for match in pattern.finditer(fh.read()):
-                    used.add(match.group(1))
-        except OSError:
-            continue
+            reverse(name)
+        except NoReverseMatch:
+            continue  # pattern requires args we do not have here
+        except Exception as exc:  # noqa: BLE001
+            broken.append((name, repr(exc)))
 
-missing = sorted(name for name in used if name not in known)
-print(f'URL names referenced : {len(used)}')
-print(f'Resolver names       : {len(known)}')
-if missing:
-    print(f'DOES NOT RESOLVE ({len(missing)}):')
-    for name in missing:
-        print('    ' + name)
-else:
-    print('All referenced URL names resolve.')
+    return used, known, missing, broken
 
-# Smoke-resolve every known name that takes no args to catch broken patterns.
-broken = []
-for name in sorted((n for n in known if isinstance(n, str)), key=str):
-    if str(name).startswith('admin:'):
-        continue
-    try:
-        reverse(name)
-    except NoReverseMatch:
-        continue  # requires args
-    except Exception as exc:  # noqa: BLE001
-        broken.append((name, repr(exc)))
-if broken:
-    print('BROKEN:')
-    for name, err in broken:
-        print(f'    {name}: {err}')
 
-sys.exit(1 if missing or broken else 0)
+def main():
+    used, known, missing, broken = audit()
+
+    print(f'URL names referenced : {len(used)}')
+    print(f'Resolver names       : {len(known)}')
+    if missing:
+        print(f'DOES NOT RESOLVE ({len(missing)}):')
+        for name in missing:
+            print('    ' + name)
+    else:
+        print('All referenced URL names resolve.')
+    if broken:
+        print('BROKEN:')
+        for name, err in broken:
+            print(f'    {name}: {err}')
+
+    return 1 if missing or broken else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

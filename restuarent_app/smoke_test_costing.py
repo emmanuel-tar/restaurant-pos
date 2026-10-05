@@ -12,8 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'restuarent_app.settings')
 
 import django  # noqa: E402
+from django.apps import apps  # noqa: E402
 
-django.setup()
+# Under `manage.py test` the app registry is already populated; only bootstrap
+# when this file is executed directly as a script.
+if not apps.ready:
+    django.setup()
 
 from decimal import Decimal  # noqa: E402
 
@@ -61,7 +65,8 @@ def _po_delete_returns_stock(po, line, material):
 
 
 @transaction.atomic
-def run():
+def run(rollback=True):
+    CHECKS.clear()
     # ---------- Unit master ----------
     Unit.ensure_defaults()
     check('unit master seeded (>=10)', Unit.objects.count() >= 10, True)
@@ -238,18 +243,22 @@ def run():
         except Exception as exc:  # noqa: BLE001
             CHECKS.append((f'GET {name} (unit-aware)', repr(exc), 200, False))
 
-    transaction.set_rollback(True)
-    return sum(1 for c in CHECKS if not c[3])
+    if rollback:
+        transaction.set_rollback(True)
+    return list(CHECKS)
 
 
 def main():
-    failed = run()
+    rows = run()
     width = 72
+    failed = 0
     print('=' * width)
-    for label, got, want, ok in CHECKS:
+    for label, got, want, ok in rows:
+        if not ok:
+            failed += 1
         print(f"[{'PASS' if ok else 'FAIL'}] {label:<42} got={got!s:<18} expected={want}")
     print('=' * width)
-    print(f'{len(CHECKS) - failed}/{len(CHECKS)} checks passed')
+    print(f'{len(rows) - failed}/{len(rows)} checks passed')
     print('NOTE: all writes were rolled back; the database is unchanged.')
     return 1 if failed else 0
 

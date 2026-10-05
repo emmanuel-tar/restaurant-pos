@@ -129,6 +129,52 @@ For Windows users, a quick launcher is also included:
 start_server.bat
 ```
 
+## Testing
+
+The project ships a Django test suite under `restuarent_app/core/tests/`:
+
+```bash
+python manage.py test                 # whole suite
+python manage.py test core.tests.test_permissions -v 2   # one module
+```
+
+The suite builds a throwaway database, so your `db.sqlite3` is never touched.
+It covers:
+
+- **Order maths** - totals with modifiers, multiple taxes, legacy tax fallback,
+  thermal bill output, order-list annotations
+- **Role permissions** - the full role/area matrix, staff-flag widening, route
+  guards (a cashier must never reach the tax or accounts screens)
+- **Production costing** - unit conversion, recipe yield/wastage, sub-recipes,
+  food-cost %, stock deduction and reversal on sale/edit/void
+- **URL audit** - every `reverse()` / `{% url %}` name in code and templates
+  must resolve, and the sidebar config must match the URLconf
+
+Two of the underlying runs also work standalone from the command line:
+
+```bash
+python smoke_test_taxes.py      # 253 checks: taxes, modifiers, screens, RBAC, holds
+python smoke_test_costing.py    # 47 checks: units, recipe costing, stock movements
+python url_audit.py             # exits 1 if a referenced route name is missing
+```
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+1. `python manage.py check`
+2. `python manage.py makemigrations --check --dry-run` - fails when a model
+   change has no migration
+3. `python url_audit.py`
+4. `python manage.py test`
+
+CI installs only `requirements-ci.txt` (5 packages). The top-level
+`requirements.txt` is a full environment dump and is not used by CI.
+
+Printing depends on `pywin32`, which is Windows-only; on other platforms
+`core/printing.py` and `core/escpos_printers.py` degrade to no-ops so the app
+still imports and the suite runs on Linux.
+
 ## Configuration
 
 The project uses Django settings in `restuarent_app/restuarent_app/settings.py`.

@@ -1,7 +1,14 @@
 # core/escpos_printers.py
 
-import win32print
-import win32ui
+try:
+    # pywin32 is Windows-only. These helpers must stay importable on other
+    # platforms (Linux CI runners, a Linux server); the print functions below
+    # become no-ops there rather than raising at import time.
+    import win32print
+    import win32ui
+except ImportError:  # pragma: no cover - non-Windows host
+    win32print = None
+    win32ui = None
 from django.conf import settings
 from django.utils.timezone import localtime
 from django.templatetags.static import static
@@ -43,6 +50,10 @@ def print_token(order):
     “Token #1234” in huge font, date/time, and item list (just names + qty),
     then a cut.
     """
+    if win32print is None:
+        print("PRINTER SKIP print_token: pywin32 is unavailable on this platform")
+        return None
+
     # 1) Open printer handle
     hPrinter = _open_printer_handle(TOKEN_PRINTER_NAME)
 
@@ -131,6 +142,10 @@ def print_bill(order):
       • Footer: “Powered by Qonkar Technologies – Contact: …”
       • Finally cut.
     """
+    if win32print is None:
+        print("PRINTER SKIP print_bill: pywin32 is unavailable on this platform")
+        return None
+
     hPrinter = _open_printer_handle(BILL_PRINTER_NAME)
 
     try:
