@@ -16,6 +16,26 @@
       <label for="id_name">Recipe Name (optional)</label>
       {{ form.name }}
     </div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem;">
+      <div>
+        <label for="id_yield_qty">Batch makes (portions)</label>
+        {{ form.yield_qty }}
+      </div>
+      <div>
+        <label for="id_wastage_percent">Wastage %</label>
+        {{ form.wastage_percent }}
+      </div>
+    </div>
+    <div>
+      <label for="id_instructions">Method / instructions</label>
+      {{ form.instructions }}
+    </div>
+
+    <div class="card" style="margin-top:.75rem;padding:.5rem .75rem;">
+      <strong>Live estimate:</strong>
+      <span id="live-cost">—</span>
+      <span class="small-muted">per portion incl. yield + wastage</span>
+    </div>
 
     <h3>Raw Materials</h3>
     <table class="table">
@@ -28,10 +48,10 @@
       <i class="fa fa-plus"></i> Add Material
     </button>
 
-    <h3 style="margin-top:1rem;">Sub‑Recipes</h3>
+    <h3 style="margin-top:1rem;">Sub‑Recipes <span class="small-muted">(qty = portions used)</span></h3>
     <table class="table">
       <thead><tr>
-        <th>#</th><th>Recipe</th><th>Quantity</th><th>Unit</th><th>Action</th>
+        <th>#</th><th>Recipe</th><th>Portions</th><th>Action</th>
       </tr></thead>
       <tbody id="sub-container"></tbody>
     </table>
@@ -98,13 +118,6 @@
           </td>
           <td><input type="number" class="inp-sub-qty" min="0.01" step="0.01" value="${it.quantity}"></td>
           <td>
-            <select class="sel-sub-unit">
-              ${units.map(u =>
-                `<option value="${u.pk}" ${u.pk === it.unit_id ? 'selected' : ''}>${u.symbol}</option>`
-              ).join('')}
-            </select>
-          </td>
-          <td>
             <button type="button" class="btn-remove-sub"><i class="fa fa-trash"></i></button>
           </td>
         </tr>
@@ -123,9 +136,10 @@
     raws.push({
       raw_material_id: materials[0].pk,
       quantity:        1,
-      unit_id:         units[0].pk
+      unit_id:         materials[0].stock_unit_id || units[0].pk
     });
     renderRaw();
+    updateLiveCost();
   });
 
   // Add sub-recipe row
@@ -133,15 +147,13 @@
     if (!recipes.length) {
       return showAlert('error', 'No recipes available to nest. Create a recipe first.');
     }
-    if (!units.length) {
-      return showAlert('error', 'No units defined. Please add at least one unit.');
-    }
     subs.push({
       sub_recipe_id: recipes[0].pk,
       quantity:      1,
-      unit_id:       units[0].pk
+      unit_id:       null
     });
     renderSub();
+    updateLiveCost();
   });
 
   // Remove or change raw-material rows
@@ -150,12 +162,20 @@
       const i = +$(this).closest('tr').data('i');
       raws.splice(i, 1);
       renderRaw();
+      updateLiveCost();
     })
     .on('change', '.sel-raw, .inp-raw-qty, .sel-raw-unit', function() {
       const row = $(this).closest('tr'), i = +row.data('i');
       raws[i].raw_material_id = +row.find('.sel-raw').val();
       raws[i].quantity        = +row.find('.inp-raw-qty').val();
       raws[i].unit_id         = +row.find('.sel-raw-unit').val();
+      // When material changes, default the unit dropdown to its stock unit.
+      const mat = materials.find(m => m.pk === raws[i].raw_material_id);
+      if ($(this).hasClass('sel-raw') && mat && mat.stock_unit_id) {
+        raws[i].unit_id = mat.stock_unit_id;
+        renderRaw();
+      }
+      updateLiveCost();
     });
 
   // Remove or change sub-recipe rows
@@ -164,13 +184,43 @@
       const i = +$(this).closest('tr').data('i');
       subs.splice(i, 1);
       renderSub();
+      updateLiveCost();
     })
-    .on('change', '.sel-sub-recipe, .inp-sub-qty, .sel-sub-unit', function() {
+    .on('change input', '.sel-sub-recipe, .inp-sub-qty', function() {
       const row = $(this).closest('tr'), i = +row.data('i');
       subs[i].sub_recipe_id = +row.find('.sel-sub-recipe').val();
       subs[i].quantity      = +row.find('.inp-sub-qty').val();
-      subs[i].unit_id       = +row.find('.sel-sub-unit').val();
+      updateLiveCost();
     });
+
+  $('#id_yield_qty, #id_wastage_percent').on('input change', updateLiveCost);
+
+  const UNIT_FACTOR = {kg:1000,g:1,mg:0.001,lb:453.592,oz:28.3495,l:1000,ml:1,tbsp:15,tsp:5,cup:240,floz:29.5735,gal:3785.41,pc:1,pcs:1,doz:12};
+  function updateLiveCost(){
+    const byUnit = {}; units.forEach(u => { byUnit[u.pk] = u; });
+    const byMat = {}; materials.forEach(m => { byMat[m.pk] = m; });
+    let gross = 0;
+    raws.forEach(it => {
+      const mat = byMat[it.raw_material_id];
+      const u = byUnit[it.unit_id];
+      if (!mat || !u) return;
+      const stockU = byUnit[mat.stock_unit_id];
+      let f = 1;
+      if (stockU && u.type === stockU.type) {
+        f = (UNIT_FACTOR[u.symbol] || 1) / (UNIT_FACTOR[stockU.symbol] || 1);
+      }
+      gross += (Number(it.quantity) || 0) * f * (Number(mat.avg_cost) || 0);
+    });
+    // Sub-recipe cost unknown client-side; note it separately.
+    const subCount = subs.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+    const yld = Number($('#id_yield_qty').val()) || 1;
+    const wst = Math.min(100, Math.max(0, Number($('#id_wastage_percent').val()) || 0));
+    const eff = (1 - wst / 100) || 1;
+    const per = yld > 0 ? gross / (yld * eff) : gross;
+    let txt = '{{ CURRENCY_SYMBOL }} ' + per.toFixed(2);
+    if (subCount > 0) txt += ' + sub-recipes';
+    $('#live-cost').text(txt);
+  }
 
   // Handle form submission via AJAX
   $('#recipe-form').submit(function(e) {
@@ -199,6 +249,7 @@
   $(document).ready(() => {
     renderRaw();
     renderSub();
+    updateLiveCost();
   });
 </script>
 

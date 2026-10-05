@@ -3,9 +3,14 @@ from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
+from django.utils.decorators import method_decorator
+from core.permissions import require_permission
 from core.models import Expense
 from core.forms import ExpenseForm
 
+
+# Money screens are guarded: only roles with the 'accounts' area may open them.
+@method_decorator(require_permission('accounts'), name='dispatch')
 class ExpenseListView(LoginRequiredMixin, ListView):
     model = Expense
     template_name = 'expenses/expense_list.html'

@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-book-open"></i> Units of Measure</h1>
+  <p class="small-muted">Master list used by raw materials, purchase orders and recipes.</p>
+</div>
+
+<table class="table">
+  <thead><tr><th>Symbol</th><th>Name</th><th>Family</th><th class="text-end">To base</th></tr></thead>
+  <tbody>
+  {% for u in units %}
+    <tr>
+      <td><strong>{{ u.symbol }}</strong></td>
+      <td>{{ u.name }}</td>
+      <td>{{ u.get_unit_type_display }}</td>
+      <td class="text-end">× {{ u.base_factor }}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4">No units defined.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small-muted">Base units: mass → gram (g), volume → millilitre (ml), count → piece (pc).
+Count pack sizes (bag/box/bottle) are set per raw material via pack size.</p>
+{% endblock %}

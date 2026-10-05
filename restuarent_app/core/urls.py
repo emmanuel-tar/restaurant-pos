@@ -101,13 +101,16 @@ urlpatterns += [
 
 from .views import (
     # … other imports …
-    RawMaterialListView, RawMaterialCreateView,
+    LowStockView, RawMaterialListView, RawMaterialCreateView,
     RawMaterialDetailView, RawMaterialUpdateView, RawMaterialDeleteView,
+    UnitListView,
 )
 
 urlpatterns += [
     # Raw Materials CRUD
-    path('raw-materials/', RawMaterialListView.as_view(), name='raw_material_list'),
+    path('inventory/low-stock/', LowStockView.as_view(), name='low_stock'),
+    path('inventory/units/', UnitListView.as_view(), name='unit_list'),
+  path('raw-materials/', RawMaterialListView.as_view(), name='raw_material_list'),
     path('raw-materials/create/', RawMaterialCreateView.as_view(), name='raw_material_create'),
     path('raw-materials/<int:pk>/', RawMaterialDetailView.as_view(), name='raw_material_detail'),
     path('raw-materials/<int:pk>/edit/', RawMaterialUpdateView.as_view(), name='raw_material_edit'),
@@ -117,6 +120,7 @@ urlpatterns += [
 
 from .views import (
     # … other imports …
+    OrderHoldView, OrderHoldRecallView, OrderHoldDeleteView,
     PurchaseOrderListView,
     PurchaseOrderCreateView,
     PurchaseOrderDetailView,
@@ -124,6 +128,13 @@ from .views import (
     PurchaseOrderDeleteView,
     purchase_order_receive,
 )
+
+urlpatterns += [
+    # Parked ("held") bills: park the current cart and recall it later.
+    path('orders/holds/',                  OrderHoldView.as_view(),        name='order_holds'),
+    path('orders/holds/<int:pk>/recall/',  OrderHoldRecallView.as_view(),  name='order_hold_recall'),
+    path('orders/holds/<int:pk>/delete/',  OrderHoldDeleteView.as_view(),  name='order_hold_delete'),
+]
 
 urlpatterns += [
     # Purchase Orders CRUD
@@ -156,6 +167,26 @@ urlpatterns += [
     path('recipes/<int:pk>/',RecipeDetailView.as_view(), name='recipe_detail'),
     path('recipes/<int:pk>/edit/',  RecipeUpdateView.as_view(), name='recipe_edit'),
     path('recipes/<int:pk>/delete/',RecipeDeleteView.as_view(), name='recipe_delete'),
+]
+
+from .views import (
+    TaxRateListView, TaxRateCreateView, TaxRateUpdateView, TaxRateDeleteView,
+    ModifierGroupListView, ModifierGroupCreateView,
+    ModifierGroupUpdateView, ModifierGroupDeleteView,
+)
+
+urlpatterns += [
+    # Taxes CRUD
+    path('taxes/',                   TaxRateListView.as_view(),   name='taxrate_list'),
+    path('taxes/create/',            TaxRateCreateView.as_view(), name='taxrate_create'),
+    path('taxes/<int:pk>/edit/',     TaxRateUpdateView.as_view(), name='taxrate_edit'),
+    path('taxes/<int:pk>/delete/',   TaxRateDeleteView.as_view(), name='taxrate_delete'),
+
+    # Modifier groups CRUD (options are edited inline on the form page)
+    path('modifiers/',                   ModifierGroupListView.as_view(),   name='modifiergroup_list'),
+    path('modifiers/create/',            ModifierGroupCreateView.as_view(), name='modifiergroup_create'),
+    path('modifiers/<int:pk>/edit/',     ModifierGroupUpdateView.as_view(), name='modifiergroup_edit'),
+    path('modifiers/<int:pk>/delete/',   ModifierGroupDeleteView.as_view(), name='modifiergroup_delete'),
 ]
 
 
@@ -332,4 +363,15 @@ from .views import MarketListView
 
 urlpatterns += [
     path('kitchen/market-list/', MarketListView.as_view(), name='market_list_print'),
+    # Legacy alias: older links / tests reverse 'market_list'.
+    path('kitchen/market-list/', MarketListView.as_view(), name='market_list'),
+]
+
+# Legacy aliases for renamed routes: 'reports' was previously
+# 'overview_report' and 'kitchen_stock_summary' was 'stock_summary'.
+# Keeping the old names means old bookmarks, dashboard links and the
+# URL audit (u.out) keep resolving while the sidebar uses the new names.
+urlpatterns += [
+    path('reports/', ReportsOverviewView.as_view(), name='overview_report'),
+    path('kitchen/stock/', KitchenStockSummaryView.as_view(), name='stock_summary'),
 ]

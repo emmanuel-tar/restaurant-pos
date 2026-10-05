@@ -145,30 +145,43 @@
         <tr>
           <th>Item</th>
           <th class="qty">Qty</th>
-          <th class="price">Unit ₹</th>
-          <th class="total">Total ₹</th>
+          <th class="price">Unit {{ CURRENCY_SYMBOL }}</th>
+          <th class="total">Total {{ CURRENCY_SYMBOL }}</th>
         </tr>
       </thead>
       <tbody>
         {% for oi in bill_items %}
           <tr>
-            <td>{{ oi.name }}</td>
+            <td>
+              {{ oi.name }}
+              {# Modifiers chosen for this line #}
+              {% if oi.modifiers.all %}
+                <div class="mods">{% for mod in oi.modifiers.all %}+ {{ mod.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+              {% endif %}
+            </td>
             <td class="qty">{{ oi.quantity }}</td>
-            <td class="price">{{ oi.unit_price|floatformat:2 }}</td>
+            <td class="price">{{ oi.effective_unit_price|floatformat:2 }}</td>
             <td class="total">{{ oi.line_total|floatformat:2 }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
 
-    {# 5) Totals: Subtotal, Discount, Tax, Service Charge, Grand Total #}
+    {# 5) Totals: Subtotal, Discount, each Tax, Service Charge, Grand Total #}
     <div class="totals">
-      <div>Subtotal: ₹{{ order.subtotal|floatformat:2 }}</div>
-      <div>Discount: ₹{{ order.discount|floatformat:2 }}</div>
-      <div>Tax ({{ order.tax_percentage }}%): ₹{{ tax_amount|floatformat:2 }}</div>
-      <div>Service Charge: ₹{{ order.service_charge|floatformat:2 }}</div>
+      <div>Subtotal: {{ CURRENCY_SYMBOL }}{{ order.get_subtotal|floatformat:2 }}</div>
+      <div>Discount: {{ CURRENCY_SYMBOL }}{{ order.discount|floatformat:2 }}</div>
+      {# One line per tax charged on this order; legacy orders show their single tax #}
+      {% for tax in order.tax_display_lines %}
+        <div>
+          {{ tax.name }}
+          {% if tax.tax_type == 'fixed' %}(fixed){% else %}({{ tax.rate|floatformat:"-2" }}%){% endif %}:
+          {{ CURRENCY_SYMBOL }}{{ tax.amount|floatformat:2 }}
+        </div>
+      {% endfor %}
+      <div>Service Charge: {{ CURRENCY_SYMBOL }}{{ order.service_charge|floatformat:2 }}</div>
       <hr>
-      <div><strong>Grand Total: ₹{{ total_amount|floatformat:2 }}</strong></div>
+      <div><strong>Grand Total: {{ CURRENCY_SYMBOL }}{{ order.get_total|floatformat:2 }}</strong></div>
     </div>
 
     {# 6) Footer میں کمپنی برانڈنگ #}

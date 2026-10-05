@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="{% static 'css/categories.css' %}" />
     <link rel="stylesheet" href="{% static 'css/menu_item.css' %}" />
     <link rel="stylesheet" href="{% static 'css/reports.css' %}" />
+    <link rel="stylesheet" href="{% static 'css/app-shell.css' %}" />
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="{% static 'js/alert.js' %}"></script>
@@ -275,51 +276,17 @@
         color: var(--color-text);
       }
 
-      /* Main navigation bar */
+      /* Legacy top bar / nav rules now live in css/app-shell.css as
+         .app-topbar / .app-sidebar. Kept here only for pages that still
+         reference .main-nav (e.g. older overrides). */
       .main-nav {
-        background: #fff;
-        display: flex;
-        justify-content: center;
-        gap: var(--space-lg);
-        padding: var(--space-sm) 0;
-        box-shadow: var(--shadow-sm);
-        border-bottom: 1px solid #e0e0e0;
+        display: none;
       }
 
-      .main-nav a {
-        display: inline-flex;
-        align-items: center;
-        font-size: var(--font-size-base);
-        color: var(--color-text);
-        padding: var(--space-xs) var(--space-sm);
-        border-radius: var(--radius-sm);
-        transition: background 0.2s, color 0.2s;
-      }
-
-      .main-nav a i {
-        margin-right: var(--space-xs);
-        font-size: 1.1rem;
-      }
-
-      .main-nav a:hover,
-      .main-nav a:focus {
-        background: var(--color-primary);
-        color: #fff;
-      }
-
-      .main-nav a.active {
-        background: var(--color-primary-dark);
-        color: #fff;
-      }
-
-      /* Bring cards above the overlay */
+      /* Bring cards above the dashboard overlay */
       .dashboard-grid .card {
         position: relative;
         z-index: 1;
-      }
-
-      /* (Optional) Lighten card backgrounds for contrast */
-      .dashboard-grid .card {
         background: rgba(255, 255, 255, 0.85);
         width: 400px;
         height: 150px;
@@ -328,32 +295,86 @@
         justify-content: center;
       }
     </style>
+
+    {# Apply the saved sidebar state before first paint so the layout never
+       flashes between expanded and collapsed. #}
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('pos.sidebar');
+          if (saved === 'collapsed' || saved === 'expanded') {
+            document.documentElement.setAttribute('data-sidebar', saved);
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
-    <header class="topbar">
-      <div class="logo"><i class="fa fa-hamburger"></i> {{ RESTAURANT_NAME }}</div>
-      <div class="user-menu">
-        <span>{{ request.user.username }}</span>
-        <a href="{% url 'logout' %}"><i class="fa fa-sign-out-alt"></i></a>
+    {% block shell %}
+    <div class="app-shell">
+{# ---------- Left sidebar ---------- #}
+      <aside class="app-sidebar" id="app-sidebar">
+        <div class="app-sidebar__brand">
+          <i class="fa fa-utensils"></i>
+          <span class="app-sidebar__brand-text">{{ RESTAURANT_NAME }}</span>
+        </div>
+
+        <nav class="app-sidebar__nav">
+          {% for section in sidebar_sections %}
+            {% if section.heading %}
+              <div class="app-sidebar__heading">{{ section.heading }}</div>
+            {% endif %}
+            {% for item in section.items %}
+              <a href="{{ item.url }}"
+                 class="app-sidebar__link{% if item.is_active %} is-active{% endif %}{% if item.accent %} is-accent{% endif %}{% if item.warn %} is-warn{% endif %}"
+                 data-label="{{ item.label }}"
+                 title="{{ item.label }}">
+                <i class="fa {{ item.icon }}"></i>
+                <span>{{ item.label }}</span>
+              </a>
+            {% endfor %}
+          {% endfor %}
+        </nav>
+
+        <div class="app-sidebar__footer">
+          <div class="app-sidebar__user">
+            <span class="avatar">{{ request.user.username|first|upper }}</span>
+            <span class="app-sidebar__user-meta">
+              {{ request.user.username }}
+              <small>{% block user_role %}{{ user_role|default:"Staff" }}{% endblock %}</small>
+            </span>
+          </div>
+        </div>
+      </aside>
+      <div class="app-sidebar__backdrop"></div>
+
+      {# ---------- Main column ---------- #}
+      <div class="app-main">
+        <header class="app-topbar">
+          <button type="button" class="app-topbar__toggle" aria-label="Toggle navigation">
+            <i class="fa fa-bars"></i>
+          </button>
+
+          <h1 class="app-topbar__title">{% block page_title %}{{ page_title|default:RESTAURANT_NAME }}{% endblock %}</h1>
+
+          <div class="app-topbar__spacer"></div>
+
+          <span class="app-topbar__clock"></span>
+
+          <a href="{% url 'order_create' %}" class="app-topbar__action" title="New Order">
+            <i class="fa fa-plus"></i>
+          </a>
+          <a href="{% url 'logout' %}" class="app-topbar__action" title="Sign out">
+            <i class="fa fa-sign-out-alt"></i>
+          </a>
+        </header>
+
+        <main class="app-content">{% block content %}{% endblock %}</main>
       </div>
-    </header>
+    </div>
+    {% endblock %}
 
-    <nav class="main-nav">
-      <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"> <i class="fa fa-home"></i> Dashboard </a>
-      <a href="{% url 'category_list' %}" class="{% if request.resolver_match.url_name == 'category_list' %}active{% endif %}"> <i class="fa fa-folder"></i> Categories </a>
-      <a href="{% url 'menuitem_list' %}" class="{% if request.resolver_match.url_name == 'menuitem_list' %}active{% endif %}"> <i class="fa fa-tags"></i> Menu Items </a>
-      <a href="{% url 'deal_list' %}" class="{% if request.resolver_match.url_name == 'deal_list' %}active{% endif %}"> <i class="fa fa-tag"></i> Deals </a>
-      <a href="{% url 'order_create' %}" class="{% if request.resolver_match.url_name == 'order_create' %}active{% endif %}"> <i class="fa fa-receipt"></i> New Order </a>
-      <a href="{% url 'order_list' %}" class="{% if request.resolver_match.url_name == 'order_list' %}active{% endif %}"> <i class="fa fa-receipt"></i> Order List </a>
-      <a href="/tables/" class="{% if request.resolver_match.url_name == 'table_list' %}active{% endif %}"> <i class="fa fa-table"></i> Tables </a>
-      <a href="/reports/" class="{% if request.resolver_match.url_name == 'reports' %}active{% endif %}"> <i class="fa fa-chart-line"></i> Reports </a>
-      <a href="{% url 'configuration' %}" class="{% if request.resolver_match.url_name == 'configuration' %}active{% endif %}"> 
-          <i class="fa fa-cog"></i> Settings 
-      </a>
-    </nav>
-
-    <main>{% block content %}{% endblock %}</main>
-
+    <script src="{% static 'js/app-shell.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   </body>
 </html>

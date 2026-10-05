@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header">
+  <h1>Modifier Groups</h1>
+  <div>
+    <a href="{% url 'taxrate_list' %}" class="btn">
+      <i class="fa fa-percent"></i> Taxes
+    </a>
+    <a href="{% url 'modifiergroup_create' %}" class="btn">
+      <i class="fa fa-plus"></i> New Group
+    </a>
+  </div>
+</div>
+
+<p class="text-muted">
+  A group is a set of choices the cashier sees when adding an item &mdash; for
+  example <em>Size</em> (Small / Medium / Large) or <em>Add-ons</em>.
+  Tick no menu items to offer the group on every item.
+</p>
+
+<form id="search-form" class="search-bar">
+  <input name="q" placeholder="Search groups..." value="{{ request.GET.q }}">
+  <button type="submit"><i class="fa fa-search"></i></button>
+</form>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Group</th><th>Pick</th><th>Options</th>
+      <th>Menu items</th><th>Active</th><th>Order</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for group in groups %}
+    <tr id="group-{{ group.pk }}">
+      <td>{{ group.name }}</td>
+      <td>
+        {% if group.min_select == 0 %}Optional{% else %}at least {{ group.min_select }}{% endif %}
+        {% if group.max_select > 1 %}&middot; up to {{ group.max_select }}{% endif %}
+      </td>
+      <td>
+        {% for option in group.options.all %}
+          {{ option.name }}{% if option.price %}({{ option.price|floatformat:2 }}){% endif %}{% if not forloop.last %}, {% endif %}
+        {% empty %}<span class="text-muted">No options</span>{% endfor %}
+      </td>
+      <td>
+        {% if group.menu_items.all %}
+          {{ group.menu_items.count }} selected
+        {% else %}
+          <span class="badge badge-info">All items</span>
+        {% endif %}
+      </td>
+      <td>{% if group.active %}<span class="badge badge-success">Yes</span>
+          {% else %}<span class="badge badge-secondary">No</span>{% endif %}</td>
+      <td>{{ group.sort_order }}</td>
+      <td>
+        <a href="{% url 'modifiergroup_edit' group.pk %}" class="btn-edit"><i class="fa fa-edit"></i></a>
+        <button class="btn-delete" data-url="{% url 'modifiergroup_delete' group.pk %}"><i class="fa fa-trash"></i></button>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="7">No modifier groups yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if is_paginated %}
+<div class="pagination">
+  {% if page_obj.has_previous %}
+    <a href="?q={{ request.GET.q }}&page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+  {% endif %}
+  <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}
+    <a href="?q={{ request.GET.q }}&page={{ page_obj.next_page_number }}">Next &raquo;</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+function getCookie(n){let v=document.cookie.match('(^|;)\\s*'+n+'=([^;]+)');return v?v.pop():'';}
+$.ajaxSetup({headers:{'X-CSRFToken':getCookie('csrftoken')}});
+$('.btn-delete').click(function(){
+  let url=$(this).data('url'), row='#group-'+url.split('/').slice(-2)[0];
+  if(confirm('Delete this group and all of its options?')){
+    $.post(url, {}, ()=>{showAlert('success','Group deleted');$(row).remove();});
+  }
+});
+</script>
+{% endblock %}

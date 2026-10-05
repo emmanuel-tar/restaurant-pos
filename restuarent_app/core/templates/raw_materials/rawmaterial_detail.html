@@ -5,10 +5,23 @@
   <a href="{% url 'raw_material_list' %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
 </div>
 
-<p><strong>Unit:</strong> {{ material.unit }}</p>
+<p><strong>Stock unit:</strong> {{ material.stock_symbol }}
+  &nbsp; <strong>Buy unit:</strong> {{ material.purchase_unit.symbol|default:material.stock_symbol }}{% if material.pack_size and material.pack_size != 1 %} (1 buy = {{ material.pack_size }} {{ material.stock_symbol }}){% endif %}</p>
 <p><strong>Supplier:</strong> {{ material.supplier.name }}</p>
-<p><strong>Current Stock:</strong> {{ material.current_stock }}</p>
-<p><strong>Reorder Level:</strong> {{ material.reorder_level }}</p>
+<p><strong>Current Stock:</strong> {{ material.current_stock }} {{ material.stock_symbol }}</p>
+<p><strong>Reorder Level:</strong> {{ material.reorder_level }} {{ material.stock_symbol }}</p>
+<p><strong>Avg cost:</strong> {{ CURRENCY_SYMBOL }}{{ avg_cost|floatformat:2 }} / {{ material.stock_symbol }}
+  &nbsp; <strong>Latest:</strong> {{ CURRENCY_SYMBOL }}{{ latest_cost|floatformat:2 }} / {{ material.stock_symbol }}</p>
+
+{% if used_in %}
+<h3><i class="fa fa-book-open"></i> Used in recipes</h3>
+<ul>
+  {% for ri in used_in %}
+  <li><a href="{% url 'recipe_detail' ri.recipe.pk %}">{{ ri.recipe.menu_item.name }}</a>
+    — {{ ri.quantity }} {{ ri.unit.symbol }} per batch</li>
+  {% endfor %}
+</ul>
+{% endif %}
 
 <h3><i class="fa fa-exchange-alt"></i> Transactions</h3>
 <ul>
@@ -16,7 +29,7 @@
     <li>
       {{ tx.timestamp|date:"Y-m-d H:i" }} –
       {{ tx.get_transaction_type_display }}:
-      {{ tx.quantity }} {{ material.unit }}
+      {{ tx.quantity }} {{ material.stock_symbol }}
     </li>
   {% empty %}
     <li>No transactions yet.</li>

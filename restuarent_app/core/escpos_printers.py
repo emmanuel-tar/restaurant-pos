@@ -188,18 +188,22 @@ def print_bill(order):
         data += b"------------------------------\n"
 
         # (6) Totals
-        subtotal = sum((oi.quantity * float(oi.unit_price)) for oi in order.items.all())
+        # Modifiers are charged per unit and each order can carry several taxes,
+        # so the totals are taken from the order model rather than recomputed here.
+        subtotal = float(order.get_subtotal())
         discount = float(order.discount or 0)
-        tax_perc = float(order.tax_percentage or 0)
         service_charge = float(order.service_charge or 0)
-
-        after_discount = max(subtotal - discount, 0)
-        tax_amt = after_discount * (tax_perc / 100)
-        grand_total = after_discount + tax_amt + service_charge
+        grand_total = float(order.get_total())
+        tax_lines = order.tax_display_lines()
 
         data += f"Subtotal:       ₹{subtotal:,.2f}\n".encode("ascii", "replace")
         data += f"Discount:       ₹{discount:,.2f}\n".encode("ascii", "replace")
-        data += f"Tax ({tax_perc:.0f}%):     ₹{tax_amt:,.2f}\n".encode("ascii", "replace")
+        for tax_line in tax_lines:
+            if tax_line.tax_type == 'fixed':
+                tax_label = f"{tax_line.name} (fixed)"
+            else:
+                tax_label = f"{tax_line.name} ({float(tax_line.rate or 0):g}%)"
+            data += (f"{tax_label + ':':<16}₹{float(tax_line.amount):,.2f}\n").encode("ascii", "replace")
         data += f"Service:        ₹{service_charge:,.2f}\n".encode("ascii", "replace")
         data += b"------------------------------\n"
         data += f"Grand Total:    ₹{grand_total:,.2f}\n".encode("ascii", "replace")

@@ -60,7 +60,7 @@
         <div class="card-header"><strong>Summary & Payment</strong></div>
         <div class="card-body">
           <div class="mb-3">
-            <label class="form-label">Subtotal (₨)</label>
+            <label class="form-label">Subtotal ({{ CURRENCY_SYMBOL }})</label>
             <input type="text" class="form-control" id="subtotal" readonly>
           </div>
 
@@ -76,7 +76,7 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Net Total (₨)</label>
+            <label class="form-label">Net Total ({{ CURRENCY_SYMBOL }})</label>
             <input type="text" class="form-control" id="net_total" readonly>
           </div>
 
@@ -87,7 +87,7 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Amount Paying Now (₨)</label>
+            <label class="form-label">Amount Paying Now ({{ CURRENCY_SYMBOL }})</label>
             <input type="number" step="0.01" min="0" class="form-control" id="paid_amount" name="paid_amount"
                    value="{% if linked_payment %}{{ linked_payment.amount }}{% else %}0{% endif %}">
           </div>
@@ -171,7 +171,7 @@
     const prevDue = Number((document.getElementById('previous_due').dataset.val)||0);
     const paidNow = Number(document.getElementById('paid_amount').value||0);
     const remaining = prevDue + net - paidNow;
-    document.getElementById('remaining_after').innerText = '₨ ' + fmt2(remaining);
+    document.getElementById('remaining_after').innerText = '{{ CURRENCY_SYMBOL }} ' + fmt2(remaining);
   }
 
   // ---------- Events ----------
@@ -219,9 +219,9 @@
       .then(r=>r.json())
       .then(d=>{
         const el = document.getElementById('previous_due');
-        el.innerText = '₨ ' + fmt2(d.previous_due);
+        el.innerText = '{{ CURRENCY_SYMBOL }} ' + fmt2(d.previous_due);
         el.dataset.val = d.previous_due;
-        document.getElementById('supplierDue').innerText = 'Previous Due: ₨ ' + fmt2(d.previous_due);
+        document.getElementById('supplierDue').innerText = 'Previous Due: {{ CURRENCY_SYMBOL }} ' + fmt2(d.previous_due);
         recalcSummary();
       });
   }

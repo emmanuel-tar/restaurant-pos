@@ -1,13 +1,9 @@
 {% extends 'base.html' %} {% load static %}
 {% block title %}Login | {{ RESTAURANT_NAME }}{% endblock %}
 
-{% block extra_head %}
-<style>
-.main-nav{
-  display: none;
-}
-</style>
-{% endblock %}
+{# The login screen is a single centred card, so it opts out of the
+   sidebar/topbar shell entirely. #}
+{% block shell %}{% endblock %}
 
 {% block content %}
 

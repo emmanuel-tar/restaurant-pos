@@ -107,7 +107,7 @@
   <div class="summary">
     <div>
       <span class="label">Subtotal:</span>
-      <span class="value">{{ order.subtotal|floatformat:2 }}</span>
+      <span class="value">{{ order.get_subtotal|floatformat:2 }}</span>
       <div class="clearfix"></div>
     </div>
     <div>
@@ -115,11 +115,18 @@
       <span class="value">{{ order.discount|floatformat:2 }}</span>
       <div class="clearfix"></div>
     </div>
+    {# One row per tax charged on this order; orders saved before tax lines
+       existed still show their single legacy tax #}
+    {% for tax in order.tax_display_lines %}
     <div>
-      <span class="label">Tax ({{ order.tax_percentage }}%):</span>
-      <span class="value">{{ tax_amount|floatformat:2 }}</span>
+      <span class="label">
+        {{ tax.name }}
+        {% if tax.tax_type == 'fixed' %}(fixed){% else %}({{ tax.rate|floatformat:"-2" }}%){% endif %}:
+      </span>
+      <span class="value">{{ tax.amount|floatformat:2 }}</span>
       <div class="clearfix"></div>
     </div>
+    {% endfor %}
     <div>
       <span class="label">Service:</span>
       <span class="value">{{ order.service_charge|floatformat:2 }}</span>
@@ -127,7 +134,7 @@
     </div>
     <div>
       <span class="label"><strong>Grand Total:</strong></span>
-      <span class="value"><strong>{{ total_amount|floatformat:2 }}</strong></span>
+      <span class="value"><strong>{{ order.get_total|floatformat:2 }}</strong></span>
       <div class="clearfix"></div>
     </div>
   </div>

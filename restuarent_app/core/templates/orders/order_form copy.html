@@ -740,7 +740,7 @@ border: none;
           <span>Table {{ table.number }}</span>
 
           {% if table.has_items %}
-          <span class="status">₨{{ table.current_order_total }}</span>
+          <span class="status">{{ CURRENCY_SYMBOL }}{{ table.current_order_total }}</span>
           {% endif %}
         </button>
         {% endfor %}
@@ -1384,12 +1384,12 @@ allWaiters.forEach(w => {
         }
         console.log("Subtotal: " + subtotal)
         if(subtotal != 0){
-          badge.innerText = `₨${subtotal.toFixed(2)}`;
+          badge.innerText = `{{ CURRENCY_SYMBOL }}${subtotal.toFixed(2)}`;
           btn.classList.add('active');
           badge.style.background = "#4caf50";
         }else if(subtotal == 0){
           console.log("subtotal else");
-          badge.innerText = `₨${subtotal.toFixed(2)}`;
+          badge.innerText = `{{ CURRENCY_SYMBOL }}${subtotal.toFixed(2)}`;
           btn.classList.remove('active');
           badge.innerText = '';
           badge.style.background = "#f4f4f4";

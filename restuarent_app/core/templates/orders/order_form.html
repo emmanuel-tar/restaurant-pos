@@ -364,6 +364,107 @@
   .btn-paid:hover {
     background: #229954;
   }
+
+  /* ---- Parked (held) bills ---- */
+  .btn-hold, .btn-recall {
+    background: #6f42c1;
+    color: #fff;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+
+  .btn-hold:hover, .btn-recall:hover {
+    background: #5a34a3;
+    color: #fff;
+  }
+
+  .hold-count {
+    display: inline-block;
+    min-width: 1.3em;
+    margin-left: 4px;
+    padding: 0 4px;
+    border-radius: 10px;
+    background: #fff;
+    color: #6f42c1;
+    font-weight: 700;
+    font-size: 0.78rem;
+  }
+
+  .holds-drawer {
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    width: 320px;
+    max-height: 340px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e2e6ee;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    z-index: 30;
+    margin-bottom: 8px;
+  }
+
+  .holds-drawer__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid #eef1f6;
+    color: #444;
+  }
+
+  .holds-drawer__close {
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #888;
+  }
+
+  .holds-drawer__list { padding: 0.4rem; }
+
+  .hold-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .hold-row:hover { background: #f4f6fa; }
+
+  .hold-row__label { font-weight: 600; color: #333; }
+  .hold-row__meta  { font-size: 0.76rem; color: #8892a4; }
+
+  .hold-row__drop {
+    border: none;
+    background: transparent;
+    color: #c0392b;
+    cursor: pointer;
+    opacity: 0.6;
+  }
+
+  .hold-row__drop:hover { opacity: 1; }
+
+  .holds-empty { padding: 1rem; text-align: center; color: #8892a4; }
+
+  /* Keep the money visible while a long order is being built. */
+  .totals-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    background: #fff;
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
+  }
+
+  .totals-sticky .totals { position: static; }
   .right-actions .btn-action i {
     margin-right: var(--space-xs);
   }
@@ -740,7 +841,7 @@ border: none;
           <span>Table {{ table.number }}</span>
 
           {% if table.has_items %}
-          <span class="status">₨{{ table.current_order_total }}</span>
+          <span class="status">{{ CURRENCY_SYMBOL }}{{ table.current_order_total }}</span>
           {% endif %}
         </button>
         {% endfor %}
@@ -784,7 +885,16 @@ border: none;
     </div>
 
     <!-- Totals (always visible, below the table) -->
-    <div class="totals">
+    <div class="totals totals-sticky">
+
+      <!-- Parked bills: a cashier can put the cart aside and come back to it. -->
+      <div id="holds-drawer" class="holds-drawer" hidden>
+        <div class="holds-drawer__head">
+          <strong><i class="fa fa-bookmark"></i> Parked bills</strong>
+          <button type="button" id="holds-close" class="holds-drawer__close">&times;</button>
+        </div>
+        <div id="holds-list" class="holds-drawer__list"></div>
+      </div>
       <div class="totals-items">
         <strong>Subtotal:</strong>
         <strong id="subtotal-amt">0.00</strong>
@@ -797,6 +907,14 @@ border: none;
         <div class="totals-items">
           <span>Tax (%):</span>
           <input id="tax-perc" type="number" min="0" step="0.01" value="{% if order %}{{ order.tax_percentage }}{% else %}0{% endif %}" />
+        </div>
+        <!-- Multiple optional taxes: tick any combination. The Tax (%) box above
+             is a manual override and is ignored while taxes are ticked here. -->
+        <div class="totals-items" id="tax-selector-wrap" style="flex-direction:column;align-items:flex-start;gap:4px;">
+          <span>Taxes:</span>
+          <div id="tax-selector" style="display:flex;flex-wrap:wrap;gap:8px;">
+            <span class="text-muted small">No taxes configured.</span>
+          </div>
         </div>
         <div class="totals-items">
           <span id="shipping-or-service">Service Charges:</span>
@@ -986,6 +1104,12 @@ border: none;
         </div>
       </div>
       <div class="buttons-actions right-actions">
+        <button class="btn-hold btn-action" title="Park this bill and start another (Ctrl+H)">
+          <i class="fa fa-pause"></i> Hold
+        </button>
+        <button class="btn-recall btn-action" title="Recall a parked bill (Ctrl+R)">
+          <i class="fa fa-bookmark"></i> Held <span id="hold-count" class="hold-count">0</span>
+        </button>
         <button class="btn-reset btn-action"><i class="fa fa-undo"></i> Reset</button>
         <button class="btn-create btn-action" style="display: none" disable>
           {% if order %}
@@ -1010,6 +1134,12 @@ border: none;
 </script>
 <script id="waiters-data" type="application/json">
   {{ waiters_json|safe }}
+</script>
+<script id="taxes-data" type="application/json">
+  {{ taxes_json|default:"[]"|safe }}
+</script>
+<script id="modifiers-data" type="application/json">
+  {{ modifiers_json|default:"{}"|safe }}
 </script>
 
 <script id="customers-data" type="application/json">
@@ -1198,7 +1328,7 @@ border: none;
     const serviceCharge = parseFloat(document.getElementById('service-charge').value) || 0;
 
     const afterDiscount = Math.max(subtotal - discount, 0);
-    const taxAmt = afterDiscount * (taxPerc / 100);
+    const taxAmt = computeTaxAmount(afterDiscount);
     const grandTotal = afterDiscount + taxAmt + serviceCharge;
 
     document.getElementById('grand-total-amt').innerText = formatPrice(grandTotal);
@@ -1258,7 +1388,7 @@ function formatPrice(price) {
         const serviceCharge = parseFloat(document.getElementById('service-charge').value) || 0;
 
         const afterDiscount = Math.max(subtotal - discount, 0);
-        const taxAmt = afterDiscount * (taxPerc / 100);
+        const taxAmt = computeTaxAmount(afterDiscount);
         const grandTotal = afterDiscount + taxAmt + serviceCharge;
 
         document.getElementById('grand-total-amt').innerText = formatPrice(grandTotal);
@@ -1334,6 +1464,351 @@ function formatPrice(price) {
       document.getElementById('existing-items-data').textContent
     );
 
+    // ===== Taxes (multiple, optional) =====
+    const CURRENCY_SYMBOL = '{{ CURRENCY_SYMBOL|escapejs }}';
+    const AVAILABLE_TAXES = JSON.parse(
+      (document.getElementById('taxes-data') || {}).textContent || '[]'
+    );
+    const MODIFIER_MAP = JSON.parse(
+      (document.getElementById('modifiers-data') || {}).textContent || '{}'
+    );
+    // Taxes already applied to the order being edited (empty when creating one).
+    const INITIAL_TAX_IDS = (
+      JSON.parse('{{ order_tax_ids_json|default:"[]"|escapejs }}') || []
+    ).map(Number);
+
+    function currentSubtotal() {
+      const el = document.getElementById('subtotal-amt');
+      if (!el) return 0;
+      return parseFloat(String(el.innerText).replace(/[^0-9.\-]/g, '')) || 0;
+    }
+
+    function selectedTaxIds() {
+      return Array.from(
+        document.querySelectorAll('#tax-selector input.tax-check:checked')
+      ).map(c => Number(c.value));
+    }
+
+    // Sums every ticked tax. With none ticked it falls back to the manual Tax (%) box,
+    // so existing behaviour is preserved.
+    function computeTaxAmount(afterDiscount) {
+      const ids = selectedTaxIds();
+      if (!ids.length) {
+        const taxPerc = parseFloat(document.getElementById('tax-perc').value) || 0;
+        return afterDiscount * (taxPerc / 100);
+      }
+      const fullSub = currentSubtotal();
+      let total = 0;
+      ids.forEach(id => {
+        const t = AVAILABLE_TAXES.find(x => Number(x.id) === Number(id));
+        if (!t) return;
+        if (t.tax_type === 'fixed') {
+          total += parseFloat(t.fixed_amount) || 0;
+        } else {
+          const base = t.applies_after_discount ? afterDiscount : fullSub;
+          total += base * ((parseFloat(t.rate) || 0) / 100);
+        }
+      });
+      return total;
+    }
+
+    function triggerTotalsRecalc() {
+      // Reuse whatever recalculation the page already listens for.
+      const d = document.getElementById('discount');
+      if (d) d.dispatchEvent(new Event('input'));
+    }
+
+    function renderTaxSelector() {
+      const box = document.getElementById('tax-selector');
+      if (!box || !AVAILABLE_TAXES.length) return;
+      box.innerHTML = AVAILABLE_TAXES.map(t => {
+        const label = t.tax_type === 'fixed'
+          ? t.name + ' (' + CURRENCY_SYMBOL + (parseFloat(t.fixed_amount) || 0).toFixed(2) + ')'
+          : t.name + ' ' + t.rate + '%';
+        const chk = (t.is_default || INITIAL_TAX_IDS.indexOf(Number(t.id)) !== -1) ? ' checked' : '';
+        return '<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">'
+          + '<input type="checkbox" class="tax-check" value="' + t.id + '"' + chk + ' /> '
+          + '<span>' + label + '</span></label>';
+      }).join('');
+      box.querySelectorAll('.tax-check').forEach(c =>
+        c.addEventListener('change', triggerTotalsRecalc));
+    }
+
+    // Draw the tax checkboxes as soon as the page is ready.
+    document.addEventListener('DOMContentLoaded', function () {
+      renderTaxSelector();
+      triggerTotalsRecalc();
+    });
+
+    // ===== Parked ("held") bills =====
+    // Park the cart, walk away, come back later and continue exactly where you
+    // left off. The server keeps the snapshot, so it survives a page reload.
+    const HOLDS_URL = '{% url "order_holds" %}';
+
+    function cartPayloadForHold() {
+      return {
+        label: null,
+        table_id: selectedTableId,
+        items: selectedItems.map(it => ({
+          type: it.type,
+          menu_item_id: it.type === 'menu' ? it.id : null,
+          deal_id: it.type === 'deal' ? it.id : null,
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+          modifiers: it.modifiers || [],
+          modifiers_total: it.modifiers_total || 0,
+        })),
+        discount: parseFloat(document.getElementById('discount').value) || 0,
+        service_charge: parseFloat(document.getElementById('service-charge').value) || 0,
+        tax_ids: selectedTaxIds(),
+      };
+    }
+
+    async function loadHolds() {
+      try {
+        const response = await fetch(HOLDS_URL, { headers: { 'X-CSRFToken': csrftoken } });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.holds || [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function paintHolds(holds) {
+      const list = document.getElementById('holds-list');
+      const badge = document.getElementById('hold-count');
+      if (badge) badge.textContent = holds.length;
+
+      if (!holds.length) {
+        list.innerHTML = '<div class="holds-empty">No parked bills.</div>';
+        return;
+      }
+
+      list.innerHTML = holds.map(h => `
+        <div class="hold-row" data-id="${h.id}">
+          <div>
+            <div class="hold-row__label">${h.label}</div>
+            <div class="hold-row__meta">
+              ${h.item_count} item${h.item_count === 1 ? '' : 's'} &middot;
+              {{ CURRENCY_SYMBOL }}${parseFloat(h.total).toFixed(2)} &middot; ${h.created_at}
+            </div>
+          </div>
+          <button class="hold-row__drop" title="Discard this parked bill">
+            <i class="fa fa-trash"></i>
+          </button>
+        </div>`).join('');
+    }
+
+    async function refreshHolds() {
+      paintHolds(await loadHolds());
+    }
+
+    function toggleHoldsDrawer(force) {
+      const drawer = document.getElementById('holds-drawer');
+      if (!drawer) return;
+      const show = force !== undefined ? force : drawer.hidden;
+      drawer.hidden = !show;
+      if (show) refreshHolds();
+    }
+
+    async function parkCurrentBill() {
+      if (!selectedItems.length) {
+        showAlert('error', 'Add at least one item before holding the bill.');
+        return;
+      }
+      const label = prompt('Name this parked bill so you can find it later:', '');
+      if (label === null) return;                      // cancelled
+
+      const payload = cartPayloadForHold();
+      payload.label = (label || '').trim();
+
+      const response = await fetch(HOLDS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showAlert('error', data.error || 'Could not park this bill.');
+        return;
+      }
+
+      // Parked: clear the screen so the next customer can be served.
+      selectedItems = [];
+      document.getElementById('discount').value = 0;
+      document.getElementById('tax-perc').value = 0;
+      document.getElementById('service-charge').value = 0;
+      document.querySelectorAll('#tax-selector input.tax-check:checked')
+        .forEach(c => { c.checked = false; });
+      renderOrderItemsTable();
+      await refreshHolds();
+      showAlert('success', 'Bill parked as "' + data.hold.label + '"');
+    }
+
+    async function recallHold(holdId) {
+      if (selectedItems.length &&
+          !confirm('Recall this parked bill? The items currently on screen will be replaced.')) {
+        return;
+      }
+      const url = '{% url "order_hold_recall" 0 %}'.replace('/0/', '/' + holdId + '/');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showAlert('error', 'Could not recall that bill.');
+        return;
+      }
+
+      const hold = data.hold;
+      selectedItems = (hold.items || []).map(it => ({
+        type: it.type,
+        id: it.type === 'menu' ? it.menu_item_id : it.deal_id,
+        name: it.type === 'menu'
+          ? ((allMenuItems.find(m => Number(m.id) === Number(it.menu_item_id)) || {}).name || 'Item')
+          : ((allDeals.find(d => Number(d.id) === Number(it.deal_id)) || {}).name || 'Deal'),
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        modifiers: it.modifiers || [],
+        modifiers_total: it.modifiers_total || 0,
+      }));
+
+      document.getElementById('discount').value = hold.discount || 0;
+      document.getElementById('service-charge').value = hold.service_charge || 0;
+      document.querySelectorAll('#tax-selector input.tax-check').forEach(c => {
+        c.checked = (hold.tax_ids || []).map(Number).indexOf(Number(c.value)) !== -1;
+      });
+
+      renderOrderItemsTable();
+      toggleHoldsDrawer(false);
+      await refreshHolds();
+      showAlert('success', 'Recalled "' + hold.label + '"');
+    }
+
+    async function discardHold(holdId) {
+      if (!confirm('Throw this parked bill away?')) return;
+      const url = '{% url "order_hold_delete" 0 %}'.replace('/0/', '/' + holdId + '/');
+      await fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+      await refreshHolds();
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      const holdButton = document.querySelector('.btn-hold');
+      const recallButton = document.querySelector('.btn-recall');
+      const closeButton = document.getElementById('holds-close');
+
+      if (holdButton) holdButton.addEventListener('click', parkCurrentBill);
+      if (recallButton) recallButton.addEventListener('click', () => toggleHoldsDrawer());
+      if (closeButton) closeButton.addEventListener('click', () => toggleHoldsDrawer(false));
+
+      const list = document.getElementById('holds-list');
+      if (list) {
+        list.addEventListener('click', function (event) {
+          const row = event.target.closest('.hold-row');
+          if (!row) return;
+          if (event.target.closest('.hold-row__drop')) discardHold(row.dataset.id);
+          else recallHold(row.dataset.id);
+        });
+      }
+
+      refreshHolds();
+
+      // ===== Keyboard shortcuts (cashiers work fast) =====
+      document.addEventListener('keydown', function (event) {
+        const typingInField = ['INPUT', 'TEXTAREA', 'SELECT']
+          .indexOf(document.activeElement.tagName) !== -1;
+
+        // Ctrl+H park, Ctrl+R recall - these work even while typing
+        if (event.ctrlKey && event.key.toLowerCase() === 'h') {
+          event.preventDefault(); parkCurrentBill(); return;
+        }
+        if (event.ctrlKey && event.key.toLowerCase() === 'r') {
+          event.preventDefault(); toggleHoldsDrawer(); return;
+        }
+        if (typingInField) return;
+
+        // "/" jumps to search, like every other POS
+        if (event.key === '/') {
+          event.preventDefault();
+          const search = document.getElementById('search-term');
+          if (search) search.focus();
+          return;
+        }
+        if (event.key === 'F9') {
+          event.preventDefault();
+          const paid = document.querySelector('.btn-paid');
+          if (paid) paid.click();
+        }
+      });
+    });
+
+    // ===== Modifiers =====
+    function modifierGroupsFor(itemId) {
+      const specific = MODIFIER_MAP[String(itemId)] || [];
+      const shared = MODIFIER_MAP['*'] || [];
+      const seen = new Set();
+      return [...specific, ...shared].filter(g => {
+        if (seen.has(g.id)) return false;
+        seen.add(g.id);
+        return true;
+      });
+    }
+
+    function modifierTotal(list) {
+      return (list || []).reduce((sum, m) => sum + (parseFloat(m.price) || 0), 0);
+    }
+
+    // Simple modal for picking modifiers. Respects min/max per group.
+    let _modifierResolve = null;
+    function openModifierPicker(itemName, groups, onDone) {
+      let html = '<div class="modal-backdrop" id="mod-picker-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;">'
+        + '<div style="background:#fff;border-radius:8px;padding:18px;min-width:320px;max-width:520px;">'
+        + '<h5 style="margin:0 0 10px;">Options for ' + itemName + '</h5>';
+      groups.forEach(g => {
+        const multi = (g.max_select || 1) > 1;
+        html += '<div style="margin-bottom:10px;"><strong>' + g.name + '</strong>'
+          + ' <span class="text-muted small">(' + (g.min_select ? 'required, ' : 'optional, ')
+          + 'pick up to ' + (g.max_select || 1) + ')</span><div style="margin-top:4px;">';
+        g.options.forEach(o => {
+          html += '<label style="display:inline-flex;align-items:center;gap:5px;margin-right:12px;cursor:pointer;">'
+            + '<input type="' + (multi ? 'checkbox' : 'radio') + '" name="modgrp_' + g.id + '" value="' + o.id + '" '
+            + 'data-name="' + o.name.replace(/"/g, '&quot;') + '" '
+            + 'data-price="' + o.price + '" /> '
+            + o.name + (parseFloat(o.price) ? ' (+' + CURRENCY_SYMBOL + parseFloat(o.price).toFixed(2) + ')' : '')
+            + '</label>';
+        });
+        html += '</div></div>';
+      });
+      html += '<div style="text-align:right;margin-top:12px;">'
+        + '<button type="button" class="btn btn-secondary" id="mod-cancel">Cancel</button> '
+        + '<button type="button" class="btn btn-primary" id="mod-ok">Add item</button></div></div></div>';
+      document.body.insertAdjacentHTML('beforeend', html);
+
+      const backdrop = document.getElementById('mod-picker-backdrop');
+      document.getElementById('mod-cancel').onclick = () => backdrop.remove();
+      document.getElementById('mod-ok').onclick = () => {
+        const chosen = [];
+        let valid = true;
+        groups.forEach(g => {
+          const picked = Array.from(
+            backdrop.querySelectorAll('input[name="modgrp_' + g.id + '"]:checked')
+          );
+          if (g.min_select && picked.length < g.min_select) valid = false;
+          if ((g.max_select || 1) && picked.length > (g.max_select || 1)) valid = false;
+          picked.forEach(cb => chosen.push({
+            id: Number(cb.value),
+            name: cb.dataset.name,
+            price: parseFloat(cb.dataset.price) || 0
+          }));
+        });
+        if (!valid) { alert('Please complete the required option group(s).'); return; }
+        backdrop.remove();
+        onDone(chosen);
+      };
+    }
+
 // ── Waiters dropdown ───────────────────────
 const allWaiters = JSON.parse(
   document.getElementById('waiters-data').textContent
@@ -1364,7 +1839,7 @@ allWaiters.forEach(w => {
       console.log("This funciton is calling......");
     let subtotal = 0;
     selectedItems.forEach(it => {
-      subtotal += it.quantity * it.unit_price;
+      subtotal += it.quantity * ((parseFloat(it.unit_price)||0) + (parseFloat(it.modifiers_total)||0));
     });
     document.getElementById('subtotal-amt').innerText = formatPrice(subtotal);
 
@@ -1373,7 +1848,7 @@ allWaiters.forEach(w => {
     const serviceCharge= parseFloat(document.getElementById('service-charge').value)|| 0;
 
     const afterDiscount = Math.max(subtotal - discount, 0);
-    const taxAmt        = afterDiscount * (taxPerc / 100);
+    const taxAmt        = computeTaxAmount(afterDiscount);
     const grandTotal    = afterDiscount + taxAmt + serviceCharge;
 
     document.getElementById('grand-total-amt').innerText = formatPrice(grandTotal);
@@ -1390,12 +1865,12 @@ allWaiters.forEach(w => {
         }
         console.log("Subtotal: " + subtotal)
         if(subtotal != 0){
-          badge.innerText = `₨${subtotal.toFixed(2)}`;
+          badge.innerText = `{{ CURRENCY_SYMBOL }}${subtotal.toFixed(2)}`;
           btn.classList.add('active');
           badge.style.background = "#4caf50";
         }else if(subtotal == 0){
           console.log("subtotal else");
-          badge.innerText = `₨${subtotal.toFixed(2)}`;
+          badge.innerText = `{{ CURRENCY_SYMBOL }}${subtotal.toFixed(2)}`;
           btn.classList.remove('active');
           badge.innerText = '';
           badge.style.background = "#f4f4f4";
@@ -1419,15 +1894,22 @@ setInterval(refreshAddedTimes, 30000);
       tbody.innerHTML = '';
 
       selectedItems.forEach((it, idx) => {
-        const amount = (it.quantity * it.unit_price).toFixed(2);
+        // Modifiers are charged per unit, so they belong in the line amount.
+        const unitWithMods = (parseFloat(it.unit_price) || 0) + (parseFloat(it.modifiers_total) || 0);
+        const amount = (it.quantity * unitWithMods).toFixed(2);
         const tr = document.createElement('tr');
         tr.setAttribute('data-source-type', it.type);
         tr.setAttribute('data-source-id',   it.id);
         tr.setAttribute('data-index',       idx);
 
+        const modsHtml = (it.modifiers && it.modifiers.length)
+          ? '<div class="text-muted small" style="font-size:.75rem;">'
+            + it.modifiers.map(m => '+ ' + m.name).join(', ') + '</div>'
+          : '';
+
         tr.innerHTML = `
           <td>${idx + 1}</td>
-          <td>${it.name}</td>
+          <td>${it.name}${modsHtml}</td>
           <td>
             <input type="number" class="item-qty-input" min="1" value="${it.quantity}">
           </td>
@@ -1530,12 +2012,32 @@ function saveTableItem(tableId, type, id, price, qty = 1) {
       selectedItems[existingIdx].added_at = new Date().toISOString(); // keep your timestamp logic
     }
   } else {
+    // Offer modifiers (Size, Add-ons, ...) when the item has any groups.
+    const groups = type === 'menu' ? modifierGroupsFor(id) : [];
+    if (groups.length) {
+      openModifierPicker(name, groups, function (chosen) {
+        selectedItems.push({
+          type,
+          id,
+          name,
+          quantity: 1,
+          unit_price: priceToUse,
+          modifiers: chosen,
+          modifiers_total: modifierTotal(chosen),
+          added_at: new Date().toISOString()
+        });
+        renderOrderItemsTable();
+      });
+      return; // the item is added by the picker callback
+    }
     selectedItems.push({
       type,
       id,
       name,
       quantity: 1,
       unit_price: priceToUse,
+      modifiers: [],
+      modifiers_total: 0,
       added_at: new Date().toISOString()  // ok if you added timestamps
     });
   }
@@ -1781,7 +2283,11 @@ searchInput.addEventListener('input', () => {
           id: it.type === 'menu' ? it.menu_item_id : it.deal_id,
           name: it.name,
           quantity: it.quantity,
-          unit_price: it.unit_price
+          unit_price: it.unit_price,
+          // Keep the modifiers already on the order, otherwise saving the
+          // edit would silently drop them.
+          modifiers: it.modifiers || [],
+          modifiers_total: it.modifiers_total || 0
         }));
       }
       renderOrderItemsTable();
@@ -1916,7 +2422,7 @@ searchInput.addEventListener('input', () => {
             const newQty = parseInt(e.target.value, 10) || 1;
             selectedItems[idx].quantity = newQty;
             tr.querySelector('.item-amount').innerText =
-              formatPrice(newQty * selectedItems[idx].unit_price);
+              formatPrice(newQty * (selectedItems[idx].unit_price + (selectedItems[idx].modifiers_total || 0)));
             recalcTotals();
           }
         });
@@ -2221,13 +2727,15 @@ printTokenBtn.addEventListener('click', () => {
     const base = {
       discount: parseFloat(document.getElementById('discount').value)||0,
       tax_percentage: parseFloat(document.getElementById('tax-perc').value)||0,
+      tax_ids: selectedTaxIds(),
       service_charge: parseFloat(document.getElementById('service-charge').value)||0,
       items: selectedItems.map(it => ({
         type: it.type,
         menu_item_id: it.type==='menu' ? it.id : null,
         deal_id:       it.type==='deal' ? it.id : null,
         quantity: it.quantity,
-        unit_price: it.unit_price
+        unit_price: it.unit_price,
+        modifiers: it.modifiers || []
       })),
       action: action,
     };
@@ -2300,7 +2808,7 @@ document.getElementById('order-items-body')
       }
 
       tr.querySelector('.item-amount').innerText =
-        formatPrice(newQty * selectedItems[idx].unit_price);
+        formatPrice(newQty * (selectedItems[idx].unit_price + (selectedItems[idx].modifiers_total || 0)));
 
       const addedTd = tr.querySelector('.item-added');
       addedTd.setAttribute('data-added', selectedItems[idx].added_at || '');

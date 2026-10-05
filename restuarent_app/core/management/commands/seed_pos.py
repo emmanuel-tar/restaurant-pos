@@ -5,7 +5,10 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import Category, MenuItem, POSSettings, PrintStation, Unit
+from core.models import (
+    Category, MenuItem, Modifier, ModifierGroup, POSSettings, PrintStation,
+    TaxRate, Unit,
+)
 
 
 class Command(BaseCommand):
@@ -66,6 +69,16 @@ class Command(BaseCommand):
             help='Remove the placeholder menu created by --demo-menu.',
         )
         parser.add_argument(
+            '--taxes',
+            action='store_true',
+            help='Create the standard tax definitions for the configured country (not applied to orders).',
+        )
+        parser.add_argument(
+            '--modifiers',
+            action='store_true',
+            help='Create example modifier groups (Size, Add-ons, Spice Level).',
+        )
+        parser.add_argument(
             '--staff',
             action='store_true',
             help='Also create a cashier and a kitchen staff account (prompts for passwords).',
@@ -120,6 +133,12 @@ class Command(BaseCommand):
 
         if options['demo_menu']:
             created_count += self._create_demo_menu()
+
+        if options['taxes']:
+            created_count += self._create_taxes()
+
+        if options['modifiers']:
+            created_count += self._create_demo_modifiers()
 
         if options['staff']:
             created_count += self._create_staff()
@@ -180,6 +199,81 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f'Removed {removed} demo menu item(s).'))
         else:
             self.stdout.write(self.style.WARNING('No demo menu found - nothing removed.'))
+
+    def _create_taxes(self):
+        """
+        Create the standard taxes for the configured country. These are only
+        definitions - nothing is added to an order until it is explicitly applied.
+        """
+        from core.countries import active_country
+
+        cfg = active_country()
+        created_count = 0
+
+        specs = [
+            {
+                'name': 'VAT',
+                'rate': cfg['vat_rate'],
+                'tax_type': 'percent',
+                'sort_order': 10,
+                'is_default': True,
+                'is_optional': True,
+                'help': 'standard VAT for {}'.format(cfg['name']),
+            },
+            {
+                'name': 'Service Charge',
+                'rate': 0,
+                'fixed_amount': 0,
+                'tax_type': 'fixed',
+                'sort_order': 20,
+                'is_default': False,
+                'is_optional': True,
+                'help': 'flat charge per bill - set the amount you want',
+            },
+        ]
+
+        for spec in specs:
+            help_text = spec.pop('help')
+            tax, created = TaxRate.objects.get_or_create(name=spec['name'], defaults=spec)
+            if created:
+                created_count += 1
+                self.stdout.write(self.style.SUCCESS(
+                    f"  + Tax: \"{tax.name}\" "
+                    f"({tax.rate}% {cfg['currency_code'] if tax.tax_type == 'percent' else 'fixed'}) - {help_text}"
+                ))
+
+        self.stdout.write('  = Taxes are definitions only - apply them per order (optional).')
+        return created_count
+
+    def _create_demo_modifiers(self):
+        """Example modifier groups so the feature is easy to explore."""
+        created_count = 0
+
+        groups = {
+            'Size': (1, 1, [('Small', 0), ('Medium', 500), ('Large', 1000)]),
+            'Add-ons': (0, 5, [('Extra Cheese', 700), ('Bacon', 800), ('Extra Sauce', 200)]),
+            'Spice Level': (1, 1, [('Mild', 0), ('Medium', 0), ('Hot', 0)]),
+        }
+
+        for sort_order, (group_name, (min_sel, max_sel, options)) in enumerate(groups.items(), start=1):
+            group, created = ModifierGroup.objects.get_or_create(
+                name=group_name,
+                defaults={'min_select': min_sel, 'max_select': max_sel, 'sort_order': sort_order},
+            )
+            if created:
+                created_count += 1
+                self.stdout.write(self.style.SUCCESS(f'  + Modifier group: "{group_name}"'))
+
+            for opt_name, price in options:
+                _, opt_created = Modifier.objects.get_or_create(
+                    group=group,
+                    name=opt_name,
+                    defaults={'price': price},
+                )
+                if opt_created:
+                    created_count += 1
+
+        return created_count
 
     def _create_staff(self):
         """Creates a cashier and a kitchen account, prompting for passwords."""

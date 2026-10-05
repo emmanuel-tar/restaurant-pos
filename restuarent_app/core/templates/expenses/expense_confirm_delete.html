@@ -9,7 +9,7 @@
       <ul>
         <li><strong>Date:</strong> {{ object.date }}</li>
         <li><strong>Category:</strong> {{ object.get_category_display }}</li>
-        <li><strong>Amount:</strong> ₨{{ object.amount }}</li>
+        <li><strong>Amount:</strong> {{ CURRENCY_SYMBOL }}{{ object.amount }}</li>
         <li><strong>Description:</strong> {{ object.description|default:"—" }}</li>
       </ul>
       <form method="post">

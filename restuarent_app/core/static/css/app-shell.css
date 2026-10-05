@@ -1,0 +1,377 @@
+/* ==========================================================================
+   App shell: collapsible left sidebar + topbar.
+
+   States
+     expanded  (default)  260px, labels visible
+     collapsed            76px, icons only, label shown as a tooltip on hover
+     mobile (<=992px)    sidebar slides off-canvas, opened with the hamburger
+
+   The state is written to localStorage by app-shell.js and re-applied via the
+   [data-sidebar] attribute on <html>, so there is no flash of the wrong layout.
+   ========================================================================== */
+
+.app-shell {
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 76px;
+  --sidebar-bg: #1f2430;
+  --sidebar-bg-alt: #171b24;
+  --sidebar-text: #c7cedb;
+  --sidebar-text-dim: #7c8698;
+  --sidebar-active: var(--color-primary, #ff5722);
+  --topbar-height: 62px;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ---------- Sidebar ---------- */
+
+.app-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-width);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  display: flex;
+  flex-direction: column;
+  z-index: 1040;
+  transition: width 0.22s ease, transform 0.22s ease;
+  overflow: hidden;
+}
+
+.app-sidebar__brand {
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 1rem;
+  background: var(--sidebar-bg-alt);
+  color: #fff;
+  font-weight: 600;
+  font-size: 1.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.app-sidebar__brand .fa-utensils {
+  color: var(--sidebar-active);
+  font-size: 1.15rem;
+  flex: 0 0 auto;
+}
+
+.app-sidebar__brand-text {
+  transition: opacity 0.18s ease;
+}
+
+.app-sidebar__nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0 1.5rem;
+}
+
+.app-sidebar__nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.app-sidebar__nav::-webkit-scrollbar-thumb {
+  background: #39414f;
+  border-radius: 3px;
+}
+
+.app-sidebar__heading {
+  padding: 0.9rem 1.1rem 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--sidebar-text-dim);
+  white-space: nowrap;
+}
+
+.app-sidebar__link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1.1rem;
+  color: var(--sidebar-text);
+  white-space: nowrap;
+  border-left: 3px solid transparent;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.app-sidebar__link i {
+  flex: 0 0 auto;
+  width: 1.1rem;
+  text-align: center;
+  font-size: 0.98rem;
+}
+
+.app-sidebar__link span {
+  transition: opacity 0.18s ease;
+}
+
+.app-sidebar__link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.app-sidebar__link.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--sidebar-active);
+  color: #fff;
+  font-weight: 600;
+}
+
+.app-sidebar__link.is-accent {
+  background: var(--sidebar-active);
+  color: #fff;
+  margin: 0.35rem 0.7rem;
+  padding-left: 0.85rem;
+  border-radius: var(--border-radius-sm, 4px);
+  border-left-color: transparent;
+}
+
+.app-sidebar__link.is-accent:hover {
+  background: var(--color-primary-dark, #e64a19);
+  color: #fff;
+}
+
+.app-sidebar__link.is-warn i {
+  color: #f39c12;
+}
+
+.app-sidebar__footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 0.6rem 0;
+  background: var(--sidebar-bg-alt);
+}
+
+.app-sidebar__user {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 1.1rem;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.app-sidebar__user .avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--sidebar-active);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.app-sidebar__user-meta small {
+  display: block;
+  color: var(--sidebar-text-dim);
+  font-size: 0.72rem;
+}
+
+/* ---------- Collapsed state (icons only) ---------- */
+
+[data-sidebar="collapsed"] .app-sidebar {
+  width: var(--sidebar-collapsed-width);
+}
+
+[data-sidebar="collapsed"] .app-sidebar__brand-text,
+[data-sidebar="collapsed"] .app-sidebar__link span,
+[data-sidebar="collapsed"] .app-sidebar__heading,
+[data-sidebar="collapsed"] .app-sidebar__user-meta {
+  opacity: 0;
+  visibility: hidden;
+}
+
+[data-sidebar="collapsed"] .app-sidebar__link {
+  padding-left: 1.35rem;
+}
+
+/* Tooltip with the full label while collapsed */
+[data-sidebar="collapsed"] .app-sidebar__link:hover::after {
+  content: attr(data-label);
+  position: absolute;
+  left: var(--sidebar-collapsed-width);
+  margin-left: 8px;
+  background: #11141b;
+  color: #fff;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  z-index: 1050;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+/* ---------- Main column ---------- */
+
+.app-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 0.22s ease;
+}
+
+[data-sidebar="collapsed"] .app-main {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+.app-topbar {
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1.25rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+}
+
+.app-topbar__toggle {
+  background: transparent;
+  border: 1px solid #e3e7ee;
+  border-radius: 6px;
+  color: #444;
+  cursor: pointer;
+  font-size: 1rem;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.app-topbar__toggle:hover {
+  background: #f1f3f7;
+}
+
+.app-topbar__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+  color: #222;
+}
+
+.app-topbar__spacer {
+  flex: 1 1 auto;
+}
+
+.app-topbar__clock {
+  font-variant-numeric: tabular-nums;
+  color: #556;
+  font-size: 0.9rem;
+  padding-right: 0.75rem;
+  border-right: 1px solid #eceff4;
+}
+
+.app-topbar__action {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid #e3e7ee;
+  background: #fff;
+  color: #556;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.app-topbar__action:hover {
+  background: #f1f3f7;
+  color: var(--color-primary, #ff5722);
+}
+
+.app-content {
+  flex: 1 1 auto;
+  padding: 1.25rem;
+}
+
+/* Backdrop behind the mobile drawer */
+.app-sidebar__backdrop {
+  display: none;
+}
+
+/* ---------- Mobile ---------- */
+
+@media (max-width: 992px) {
+  .app-sidebar {
+    transform: translateX(-100%);
+    width: var(--sidebar-width);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+  }
+
+  [data-sidebar="mobile-open"] .app-sidebar {
+    transform: translateX(0);
+  }
+
+  .app-main,
+  [data-sidebar="collapsed"] .app-main {
+    margin-left: 0;
+  }
+
+  /* Labels stay readable on small screens even if collapsed on desktop. */
+  [data-sidebar="collapsed"] .app-sidebar__brand-text,
+  [data-sidebar="collapsed"] .app-sidebar__link span,
+  [data-sidebar="collapsed"] .app-sidebar__heading,
+  [data-sidebar="collapsed"] .app-sidebar__user-meta {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  [data-sidebar="collapsed"] .app-sidebar__link:hover::after {
+    display: none;
+  }
+
+  [data-sidebar="mobile-open"] .app-sidebar__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1030;
+  }
+
+  .app-topbar__clock {
+    display: none;
+  }
+
+  .app-content {
+    padding: 0.85rem;
+  }
+}
+
+/* ---------- Print (receipts, reports) ---------- */
+
+@media print {
+  .app-sidebar,
+  .app-topbar,
+  .app-sidebar__backdrop {
+    display: none !important;
+  }
+
+  .app-main {
+    margin-left: 0 !important;
+  }
+
+  .app-content {
+    padding: 0;
+  }
+}

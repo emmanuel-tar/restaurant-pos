@@ -6,30 +6,56 @@
 </div>
 
 <p><strong>Name:</strong> {{ recipe.name|default:"—" }}</p>
+<p><strong>Batch makes:</strong> {{ recipe.yield_qty }} portion(s)
+  &nbsp; <strong>Wastage:</strong> {{ recipe.wastage_percent }}%
+  {% if recipe.wastage_qty %}(≈ {{ recipe.wastage_qty }} portion(s) lost){% endif %}</p>
+{% if recipe.instructions %}<p><strong>Method:</strong> {{ recipe.instructions|linebreaksbr }}</p>{% endif %}
 
 <h3>Raw Materials</h3>
-<ul>
-  {% for ri in recipe.raw_ingredients.all %}
-  <li>
-    {{ ri.quantity }} {{ ri.unit.symbol }} of {{ ri.raw_material.name }}
-  </li>
+<table class="table">
+  <thead><tr><th>Material</th><th class="text-end">Recipe qty</th><th class="text-end">Stock qty</th><th class="text-end">Unit cost</th><th class="text-end">Line cost</th></tr></thead>
+  <tbody>
+  {% for l in breakdown.lines %}
+    <tr>
+      <td>{{ l.name }}</td>
+      <td class="text-end">{{ l.quantity }} {{ l.unit }}</td>
+      <td class="text-end">{{ l.stock_qty }} {{ l.stock_unit }}</td>
+      <td class="text-end">{{ CURRENCY_SYMBOL }}{{ l.unit_cost|floatformat:2 }}</td>
+      <td class="text-end">{{ CURRENCY_SYMBOL }}{{ l.line_cost|floatformat:2 }}</td>
+    </tr>
   {% empty %}
-  <li>None</li>
+    <tr><td colspan="5">None</td></tr>
   {% endfor %}
-</ul>
+  </tbody>
+</table>
 
-<h3>Sub‑Recipes</h3>
-<ul>
-  {% for sr in recipe.subrecipes.all %}
-  <li>
-    {{ sr.quantity }} {{ sr.unit.symbol }} of {{ sr.sub_recipe.menu_item.name }}
-  </li>
-  {% empty %}
-  <li>None</li>
+{% if breakdown.sub_recipe_lines %}
+<h3>Sub‑Recipes <span class="small-muted">(qty = portions used)</span></h3>
+<table class="table">
+  <thead><tr><th>Recipe</th><th class="text-end">Portions</th><th class="text-end">Per portion</th><th class="text-end">Line cost</th></tr></thead>
+  <tbody>
+  {% for s in breakdown.sub_recipe_lines %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td class="text-end">{{ s.quantity }}</td>
+      <td class="text-end">{{ CURRENCY_SYMBOL }}{{ s.portion_cost|floatformat:2 }}</td>
+      <td class="text-end">{{ CURRENCY_SYMBOL }}{{ s.line_cost|floatformat:2 }}</td>
+    </tr>
   {% endfor %}
-</ul>
+  </tbody>
+</table>
+{% endif %}
 
-<p><strong>Calculated Cost Price:</strong> {{ recipe.menu_item.cost_price|floatformat:2 }}</p>
+<div class="card" style="padding:.75rem 1rem;margin:.75rem 0;">
+  <div><strong>Batch cost:</strong> {{ CURRENCY_SYMBOL }}{{ breakdown.gross_cost|floatformat:2 }}</div>
+  <div><strong>Estimated cost per portion:</strong> {{ CURRENCY_SYMBOL }}{{ breakdown.cost_per_portion|floatformat:2 }}</div>
+  <div><strong>Sell price ({{ recipe.menu_item.name }}):</strong> {{ CURRENCY_SYMBOL }}{{ recipe.menu_item.price|floatformat:2 }}</div>
+  {% if economics.food_cost_percent != None %}
+  <div><strong>Food cost:</strong> {{ economics.food_cost_percent }}%
+    &nbsp; <strong>Margin:</strong> {{ CURRENCY_SYMBOL }}{{ economics.margin_amount|floatformat:2 }} ({{ economics.margin_percent }}%)</div>
+  {% endif %}
+  <div class="small-muted">Stored cost_price: {{ CURRENCY_SYMBOL }}{{ recipe.menu_item.cost_price|floatformat:2 }}</div>
+</div>
 
 <a href="{% url 'recipe_edit' recipe.pk %}" class="btn"><i class="fa fa-edit"></i> Edit</a>
 {% endblock %}

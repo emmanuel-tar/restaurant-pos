@@ -1,14 +1,37 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Item: {{ item.name }}</h1>
-<img src="{{ item.image.url }}" width="150">
+{% if item.image %}<img src="{{ item.image.url }}" width="150">{% endif %}
 <p><strong>Category:</strong> {{ item.category.name }}</p>
-<p><strong>Price:</strong> {{ item.price }}</p>
+<p><strong>Price:</strong> {{ CURRENCY_SYMBOL }}{{ item.price }}</p>
 <p><strong>Food Panda Price:</strong> {{ item.food_panda_price|default:"0" }}</p>
 <p><strong>Weight/Quantity:</strong> {{ item.get_weight_display|default:"N/A" }}</p>
 <p><strong>Rank:</strong> {{ item.rank|default:"0" }}</p>
 <p><strong>Available:</strong> {{ item.is_available|yesno:'Yes,No' }}</p>
 <p>{{ item.description }}</p>
+
+<div class="card" style="padding:.75rem 1rem;margin:.75rem 0;max-width:640px;">
+  <h3 style="margin-top:0;">Production estimate</h3>
+  {% if economics.has_recipe and breakdown %}
+    <div><strong>Estimated cost / portion:</strong> {{ CURRENCY_SYMBOL }}{{ economics.estimated_cost|floatformat:2 }}</div>
+    {% if economics.food_cost_percent != None %}
+    <div><strong>Food cost:</strong> {{ economics.food_cost_percent }}%
+      &nbsp; <strong>Margin:</strong> {{ CURRENCY_SYMBOL }}{{ economics.margin_amount|floatformat:2 }} ({{ economics.margin_percent }}%)</div>
+    {% endif %}
+    <table class="table" style="margin-top:.5rem;">
+      <thead><tr><th>Ingredient</th><th class="text-end">Qty</th><th class="text-end">Line cost</th></tr></thead>
+      <tbody>
+      {% for l in breakdown.all_lines %}
+        <tr><td>{{ l.name }}</td><td class="text-end">{{ l.quantity }} {{ l.unit }}</td><td class="text-end">{{ CURRENCY_SYMBOL }}{{ l.line_cost|floatformat:2 }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="small-muted">Batch of {{ breakdown.yield_qty }} portion(s), {{ breakdown.wastage_percent }}% wastage. Stored cost_price: {{ CURRENCY_SYMBOL }}{{ item.cost_price|floatformat:2 }}</div>
+  {% else %}
+    <div class="small-muted">No recipe linked — attach one from <a href="{% url 'recipe_create' %}">Recipes</a> to get a live food-cost estimate.</div>
+  {% endif %}
+</div>
+
 <a href="{% url 'menuitem_edit' item.pk %}" class="btn"><i class="fa fa-edit"></i> Edit</a>
 <a href="{% url 'menuitem_list' %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
 {% endblock %}

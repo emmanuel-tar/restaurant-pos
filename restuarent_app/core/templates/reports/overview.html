@@ -82,25 +82,25 @@
     <div class="col-12 col-sm-6 col-xl-3">
       <div class="kpi-card blue">
         <div class="kpi-label">Total Revenue</div>
-        <div class="kpi-val">₨ {{ kpi_revenue }}</div>
+        <div class="kpi-val">{{ CURRENCY_SYMBOL }} {{ kpi_revenue }}</div>
       </div>
     </div>
     <div class="col-12 col-sm-6 col-xl-3">
       <div class="kpi-card orange">
         <div class="kpi-label">{{ cost_label }}</div>
-        <div class="kpi-val">₨ {{ kpi_cost }}</div>
+        <div class="kpi-val">{{ CURRENCY_SYMBOL }} {{ kpi_cost }}</div>
       </div>
     </div>
     <div class="col-12 col-sm-6 col-xl-3">
       <div class="kpi-card red">
         <div class="kpi-label">Operational Exp.</div>
-        <div class="kpi-val">₨ {{ kpi_other }}</div>
+        <div class="kpi-val">{{ CURRENCY_SYMBOL }} {{ kpi_other }}</div>
       </div>
     </div>
     <div class="col-12 col-sm-6 col-xl-3">
       <div class="kpi-card green">
         <div class="kpi-label">Net Profit</div>
-        <div class="kpi-val text-success">₨ {{ kpi_profit }}</div>
+        <div class="kpi-val text-success">{{ CURRENCY_SYMBOL }} {{ kpi_profit }}</div>
       </div>
     </div>
   </div>
@@ -203,7 +203,7 @@
   Chart.defaults.font.family = "'Segoe UI', sans-serif";
   Chart.defaults.color = '#666';
   
-  const fmtMoney = (val) => '₨ ' + Number(val).toLocaleString('en-PK');
+  const fmtMoney = (val) => '{{ CURRENCY_SYMBOL }} ' + Number(val).toLocaleString('{{ CURRENCY_LOCALE }}');
 
   // --- 1. Daily Chart (Line) ---
   new Chart(document.getElementById('dailyChart'), {
@@ -279,7 +279,7 @@
           color: '#333',
           font: { weight: 'bold', size: 11 },
           formatter: function(value, context) {
-             return fmtMoney(value); // Shows "₨ 1,200" directly on chart
+             return fmtMoney(value); // Shows "{{ CURRENCY_SYMBOL }} 1,200" directly on chart
           }
         },
         tooltip: {

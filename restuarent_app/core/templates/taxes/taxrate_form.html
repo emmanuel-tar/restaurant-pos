@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if object %}Edit Tax{% else %}New Tax{% endif %}</h1>
+  <a href="{% url 'taxrate_list' %}" class="btn">&larr; Back</a>
+</div>
+
+<form method="post" id="tax-form">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">{{ form.name.label }}</label>
+          {{ form.name }}
+          <div class="form-text">{{ form.name.help_text }}</div>
+          {{ form.name.errors }}
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label">{{ form.tax_type.label }}</label>
+          {{ form.tax_type }}
+          {{ form.tax_type.errors }}
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label">{{ form.sort_order.label }}</label>
+          {{ form.sort_order }}
+          {{ form.sort_order.errors }}
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">{{ form.rate.label }}</label>
+          {{ form.rate }}
+          <div class="form-text">{{ form.rate.help_text }}</div>
+          {{ form.rate.errors }}
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label">{{ form.fixed_amount.label }}</label>
+          {{ form.fixed_amount }}
+          <div class="form-text">{{ form.fixed_amount.help_text }}</div>
+          {{ form.fixed_amount.errors }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-header"><i class="fa fa-toggle-on"></i> Behaviour</div>
+    <div class="card-body">
+      <div class="form-check mb-2">
+        {{ form.active }}
+        <label class="form-check-label" for="{{ form.active.id_for_label }}">
+          {{ form.active.label }}
+          <span class="form-text d-block">{{ form.active.help_text }}</span>
+        </label>
+        {{ form.active.errors }}
+      </div>
+      <div class="form-check mb-2">
+        {{ form.is_default }}
+        <label class="form-check-label" for="{{ form.is_default.id_for_label }}">
+          {{ form.is_default.label }}
+          <span class="form-text d-block">{{ form.is_default.help_text }}</span>
+        </label>
+        {{ form.is_default.errors }}
+      </div>
+      <div class="form-check mb-2">
+        {{ form.is_optional }}
+        <label class="form-check-label" for="{{ form.is_optional.id_for_label }}">
+          {{ form.is_optional.label }}
+          <span class="form-text d-block">{{ form.is_optional.help_text }}</span>
+        </label>
+        {{ form.is_optional.errors }}
+      </div>
+      <div class="form-check mb-2">
+        {{ form.applies_after_discount }}
+        <label class="form-check-label" for="{{ form.applies_after_discount.id_for_label }}">
+          {{ form.applies_after_discount.label }}
+          <span class="form-text d-block">{{ form.applies_after_discount.help_text }}</span>
+        </label>
+        {{ form.applies_after_discount.errors }}
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn-submit"><i class="fa fa-save"></i> Save Tax</button>
+  <a href="{% url 'taxrate_list' %}" class="btn">Cancel</a>
+</form>
+
+<script>
+// Hide the field that does not apply to the selected tax type.
+function syncTaxTypeFields() {
+  const type = document.getElementById('id_tax_type').value;
+  document.getElementById('div_id_rate').style.display =
+    (type === 'percent') ? '' : 'none';
+  document.getElementById('div_id_fixed_amount').style.display =
+    (type === 'fixed') ? '' : 'none';
+}
+document.getElementById('id_tax_type').addEventListener('change', syncTaxTypeFields);
+syncTaxTypeFields();
+</script>
+{% endblock %}

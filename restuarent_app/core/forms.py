@@ -239,6 +239,116 @@ class PrintStationForm(forms.ModelForm):
         }
 
 
+# ---------- Taxes & Modifiers ----------
+from django.forms import inlineformset_factory
+from django.forms.formsets import DELETION_FIELD_NAME
+from django.forms.utils import ErrorDict
+from core.models import TaxRate, ModifierGroup, Modifier
+
+
+class TaxRateForm(forms.ModelForm):
+    class Meta:
+        model = TaxRate
+        fields = [
+            'name', 'tax_type', 'rate', 'fixed_amount',
+            'active', 'is_default', 'is_optional',
+            'applies_after_discount', 'sort_order',
+        ]
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. VAT'}),
+            'tax_type': forms.Select(attrs={'class': 'form-select'}),
+            'rate': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': 0}),
+            'fixed_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': 0}),
+            'sort_order': forms.NumberInput(attrs={'class': 'form-control', 'step': 1}),
+            'active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_default': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_optional': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'applies_after_discount': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ('active', 'is_default', 'is_optional', 'applies_after_discount'):
+            self.fields[name].required = False
+
+
+class ModifierGroupForm(forms.ModelForm):
+    class Meta:
+        model = ModifierGroup
+        fields = ['name', 'min_select', 'max_select', 'active', 'sort_order', 'menu_items']
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Size, Add-ons'}),
+            'min_select': forms.NumberInput(attrs={'class': 'form-control', 'min': 0}),
+            'max_select': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
+            'sort_order': forms.NumberInput(attrs={'class': 'form-control', 'step': 1}),
+            'active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'menu_items': forms.SelectMultiple(attrs={'class': 'form-select', 'size': 8}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['active'].required = False
+        self.fields['menu_items'].required = False
+        self.fields['menu_items'].help_text = (
+            'Leave empty to offer this group on every menu item.'
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        minimum = cleaned.get('min_select')
+        maximum = cleaned.get('max_select')
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise forms.ValidationError(
+                'Minimum selections cannot be greater than the maximum.'
+            )
+        return cleaned
+
+
+class ModifierForm(forms.ModelForm):
+    class Meta:
+        model = Modifier
+        fields = ['name', 'price', 'active', 'sort_order']
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Large'}),
+            'price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'sort_order': forms.NumberInput(attrs={'class': 'form-control', 'step': 1}),
+            'active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['active'].required = False
+
+    def _is_blank_row(self):
+        return not (self.cleaned_data.get('name') or '').strip()
+
+    def clean(self):
+        cleaned = super().clean()
+        # A row the user left completely blank means "no option here".
+        # Without this the spare rows would fail on every save, because an
+        # unticked 'active' box makes an otherwise empty row look changed.
+        if self._is_blank_row():
+            self._errors = ErrorDict()
+            # Tell the formset to skip this row instead of saving an empty option.
+            if DELETION_FIELD_NAME in self.fields:
+                cleaned[DELETION_FIELD_NAME] = True
+        return cleaned
+
+    def _post_clean(self):
+        # Blank rows must also skip the model's unique_together checks,
+        # otherwise every spare row fails with "name cannot be blank".
+        if self._is_blank_row():
+            self._errors = ErrorDict()
+            return
+        super()._post_clean()
+
+
+ModifierOptionFormSet = inlineformset_factory(
+    ModifierGroup, Modifier, form=ModifierForm,
+    extra=3, can_delete=True,
+)
+
+
 from django import forms
 from core.models import PaymentReceived
 

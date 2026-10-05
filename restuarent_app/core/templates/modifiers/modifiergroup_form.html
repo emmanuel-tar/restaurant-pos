@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if object %}Edit Group{% else %}New Group{% endif %}</h1>
+  <a href="{% url 'modifiergroup_list' %}" class="btn">&larr; Back</a>
+</div>
+
+<form method="post" id="group-form">
+  {% csrf_token %}
+
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-header"><i class="fa fa-sliders"></i> Group</div>
+    <div class="card-body">
+      {{ form.non_field_errors }}
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">{{ form.name.label }}</label>
+          {{ form.name }}
+          <div class="form-text">{{ form.name.help_text }}</div>
+          {{ form.name.errors }}
+        </div>
+        <div class="col-md-2 mb-3">
+          <label class="form-label">{{ form.min_select.label }}</label>
+          {{ form.min_select }}
+          <div class="form-text">{{ form.min_select.help_text }}</div>
+          {{ form.min_select.errors }}
+        </div>
+        <div class="col-md-2 mb-3">
+          <label class="form-label">{{ form.max_select.label }}</label>
+          {{ form.max_select }}
+          <div class="form-text">{{ form.max_select.help_text }}</div>
+          {{ form.max_select.errors }}
+        </div>
+        <div class="col-md-2 mb-3">
+          <label class="form-label">{{ form.sort_order.label }}</label>
+          {{ form.sort_order }}
+          {{ form.sort_order.errors }}
+        </div>
+        <div class="col-md-2 mb-3">
+          <div class="form-check mt-4">
+            {{ form.active }}
+            <label class="form-check-label" for="{{ form.active.id_for_label }}">
+              {{ form.active.label }}
+            </label>
+          </div>
+          {{ form.active.errors }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-header"><i class="fa fa-list"></i> Options</div>
+    <div class="card-body">
+      {{ option_formset.management_form }}
+      {% if option_formset.non_form_errors %}
+        <div class="alert alert-danger">{{ option_formset.non_form_errors }}</div>
+      {% endif %}
+      <table class="table" id="options-table">
+        <thead>
+          <tr>
+            <th style="width:40%">Name</th>
+            <th style="width:20%">Extra price</th>
+            <th style="width:15%">Order</th>
+            <th style="width:15%">Active</th>
+            <th style="width:10%">Remove</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for option_form in option_formset %}
+          <tr {% if option_form.instance.pk %}data-existing="true"{% endif %}>
+            <td>{{ option_form.id }}{{ option_form.name }}
+              {% if option_form.name.errors %}<div class="text-danger small">{{ option_form.name.errors }}</div>{% endif %}
+            </td>
+            <td>{{ option_form.price }}
+              {% if option_form.price.errors %}<div class="text-danger small">{{ option_form.price.errors }}</div>{% endif %}
+            </td>
+            <td>{{ option_form.sort_order }}</td>
+            <td>{{ option_form.active }}</td>
+            <td>
+              {% if option_form.instance.pk %}
+                <label class="form-check-label small">
+                  {{ option_form.DELETE }} delete
+                </label>
+              {% else %}
+                <span class="text-muted small">&mdash;</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" class="btn btn-sm" id="add-option">
+        <i class="fa fa-plus"></i> Add option
+      </button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-header"><i class="fa fa-utensils"></i> Applies to</div>
+    <div class="card-body">
+      <label class="form-label">{{ form.menu_items.label }}</label>
+      {{ form.menu_items }}
+      <div class="form-text">{{ form.menu_items.help_text }}</div>
+      {{ form.menu_items.errors }}
+    </div>
+  </div>
+
+  <button type="submit" class="btn-submit"><i class="fa fa-save"></i> Save Group</button>
+  <a href="{% url 'modifiergroup_list' %}" class="btn">Cancel</a>
+</form>
+
+<script>
+// Clone the last (blank) option row so extra choices can be added without a reload.
+document.getElementById('add-option').addEventListener('click', function () {
+  const totalForms = document.getElementById('id_options-TOTAL_FORMS');
+  const index = parseInt(totalForms.value, 10);
+  const tbody = document.querySelector('#options-table tbody');
+  const lastRow = tbody.lastElementChild;
+
+  if (!lastRow || lastRow.dataset.existing === 'true') {
+    showAlert('error', 'Fill in the last option row before adding another.');
+    return;
+  }
+
+  const html = lastRow.outerHTML.replace(/__prefix__/g, index);
+  const temp = document.createElement('tbody');
+  temp.innerHTML = html;
+  const newRow = temp.firstElementChild;
+
+  newRow.dataset.existing = 'false';
+  // A freshly cloned row must not carry the previous row's typed values.
+  newRow.querySelectorAll('input').forEach(function (input) {
+    if (input.type === 'hidden') return;
+    if (input.type === 'checkbox') input.checked = false;
+    else input.value = '';
+  });
+
+  tbody.appendChild(newRow);
+  totalForms.value = index + 1;
+});
+</script>
+{% endblock %}

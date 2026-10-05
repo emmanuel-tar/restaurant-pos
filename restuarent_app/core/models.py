@@ -61,6 +61,70 @@ class Unit(models.Model):
     def __str__(self):
         return self.symbol
 
+    # Base units per family: everything converts through these.
+    # Mass -> gram, Volume -> millilitre, Count -> piece.
+    BASE_UNIT = {'mass': 'g', 'volume': 'ml', 'count': 'pc'}
+    # to_base_factor: multiply an amount in `symbol` to get base units.
+    FACTORS = {
+        # mass (base g)
+        'kg': 1000, 'g': 1, 'mg': 0.001, 'lb': 453.592, 'oz': 28.3495,
+        # volume (base ml)
+        'l': 1000, 'ml': 1, 'tbsp': 15, 'tsp': 5, 'cup': 240,
+        'floz': 29.5735, 'gal': 3785.41,
+        # count (base pc) - pack sizes configured per material via pack_size
+        'pc': 1, 'pcs': 1, 'doz': 12, 'box': 1, 'pack': 1, 'bag': 1, 'bottle': 1, 'can': 1,
+    }
+
+    @classmethod
+    def to_base_factor(cls, symbol) -> float:
+        """Multiply an amount in `symbol` to get base units (g/ml/pc)."""
+        if symbol is None:
+            return 1
+        s = (getattr(symbol, 'symbol', None) or str(symbol)).strip().lower()
+        if not s:
+            return 1
+        if s in cls.FACTORS:
+            return cls.FACTORS[s]
+        try:
+            return float(Unit.objects.filter(symbol__iexact=s).values_list('id', flat=True).first() and 1 or 1)
+        except Exception:
+            return 1
+
+    @classmethod
+    def base_symbol_for(cls, unit_type):
+        return cls.BASE_UNIT.get(unit_type or '', '')
+
+    @classmethod
+    def convert(cls, qty, from_symbol, to_symbol):
+        """Convert qty from one symbol to another within the same family."""
+        from decimal import Decimal
+        fs = (getattr(from_symbol, 'symbol', None) or str(from_symbol or '')).strip().lower()
+        ts = (getattr(to_symbol, 'symbol', None) or str(to_symbol or '')).strip().lower()
+        if not fs or not ts or fs == ts:
+            return Decimal(str(qty or 0))
+        f = Decimal(str(cls.to_base_factor(fs)))
+        t = Decimal(str(cls.to_base_factor(ts)))
+        if not t:
+            return Decimal('0')
+        return (Decimal(str(qty or 0)) * f / t)
+
+    @classmethod
+    def ensure_defaults(cls):
+        """Seed the standard restaurant unit master (idempotent)."""
+        defaults = [
+            ('Kilogram', 'kg', 'mass'), ('Gram', 'g', 'mass'),
+            ('Milligram', 'mg', 'mass'), ('Pound', 'lb', 'mass'), ('Ounce', 'oz', 'mass'),
+            ('Litre', 'l', 'volume'), ('Millilitre', 'ml', 'volume'),
+            ('Tablespoon', 'tbsp', 'volume'), ('Teaspoon', 'tsp', 'volume'),
+            ('Cup', 'cup', 'volume'), ('Fluid Ounce', 'floz', 'volume'),
+            ('Piece', 'pc', 'count'), ('Dozen', 'doz', 'count'),
+            ('Pack', 'pack', 'count'), ('Box', 'box', 'count'),
+            ('Bag', 'bag', 'count'), ('Bottle', 'bottle', 'count'), ('Can', 'can', 'count'),
+        ]
+        for name, symbol, typ in defaults:
+            cls.objects.get_or_create(symbol=symbol, defaults={'name': name, 'unit_type': typ})
+
+
 
 class PrintStation(models.Model):
     name = models.CharField(max_length=100, unique=True, help_text="e.g. Main Kitchen, BBQ Section, Bar")
@@ -151,7 +215,7 @@ class MenuItem(models.Model):
     station = models.ForeignKey(PrintStation, on_delete=models.SET_NULL, null=True, blank=True, related_name="menu_items")
 
     def __str__(self):
-        return f"{self.name} – {self.category.name}"
+        return f"{self.name} â€“ {self.category.name}"
 
     def get_effective_station(self):
         """Returns item specific station, or falls back to category station."""
@@ -169,6 +233,59 @@ class MenuItem(models.Model):
     
 
 # ---------- Deals (New) ----------
+# ---------- Menu Item Modifiers ----------
+class ModifierGroup(models.Model):
+    """
+    A group of options attached to menu items, e.g. "Size", "Spice Level",
+    "Add-ons". A group can be required (must pick), optional, or single-choice.
+    """
+    name = models.CharField(max_length=100, unique=True, help_text="e.g. Size, Add-ons, Spice Level")
+    min_select = models.PositiveIntegerField(
+        default=0, help_text="How many the cashier must pick. 0 = optional")
+    max_select = models.PositiveIntegerField(
+        default=1, help_text="Maximum allowed. 1 = single choice, higher = pick several")
+    active = models.BooleanField(default=True)
+    menu_items = models.ManyToManyField(
+        MenuItem, blank=True, related_name='modifier_groups',
+        help_text="Menu items that offer this group. Leave empty to apply to every item.")
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_required(self):
+        return self.min_select > 0
+
+    def applies_to(self, menu_item):
+        """True when this group should be offered for the given menu item."""
+        if not self.active:
+            return False
+        item_ids = self.menu_items.values_list('id', flat=True)
+        return not item_ids.exists() or menu_item.id in item_ids
+
+
+class Modifier(models.Model):
+    """One selectable option inside a ModifierGroup (e.g. Large, Extra Cheese)."""
+    group = models.ForeignKey(ModifierGroup, on_delete=models.CASCADE, related_name='options')
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Added to the item price. Use 0 for no extra cost, negative to reduce.")
+    active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+        unique_together = [('group', 'name')]
+
+    def __str__(self):
+        return f"{self.name} ({self.group.name})"
+
+
 class Deal(models.Model):
     """
     A Deal bundles multiple MenuItems (with quantities).
@@ -260,7 +377,125 @@ class Order(models.Model):
     source = models.CharField(max_length=20, choices=[('food_panda', 'Food Panda'), ('walk_in','Walk-in')], null=True, blank=True)
 
     def __str__(self):
-        return f"Order #{self.number} – {self.get_status_display()}"
+        return f"Order #{self.number} â€“ {self.get_status_display()}"
+
+    # ---------- Taxes (multiple, optional) ----------
+    def get_subtotal(self):
+        """Sum of all line totals, modifiers included."""
+        from decimal import Decimal
+        return sum((i.line_total() for i in self.items.all()), Decimal('0'))
+
+    def get_tax_lines(self):
+        """Tax lines applied to this order (may be empty for orders using the legacy field)."""
+        return self.tax_lines.all()
+
+    def get_tax_total(self):
+        """
+        Total tax charged on this order.
+
+        Prefers the tax_lines table (supports several taxes). Falls back to the
+        legacy single tax_percentage field for orders created before this existed,
+        so historical bills keep calculating exactly as they always did.
+        """
+        from decimal import Decimal
+        lines = list(self.tax_lines.all())
+        if lines:
+            return sum((l.amount for l in lines), Decimal('0'))
+        base = self.get_subtotal() - (self.discount or Decimal('0'))
+        if base < 0:
+            base = Decimal('0')
+        return ((base * (self.tax_percentage or Decimal('0'))) / Decimal('100')).quantize(Decimal('0.01'))
+
+    def get_total(self):
+        """Grand total: subtotal - discount + taxes + service charge."""
+        from decimal import Decimal
+        base = self.get_subtotal() - (self.discount or Decimal('0'))
+        if base < 0:
+            base = Decimal('0')
+        return base + self.get_tax_total() + (self.service_charge or Decimal('0'))
+
+    def apply_tax(self, tax_rate):
+        """
+        Add a tax from the TaxRate catalogue to this order, replacing any existing
+        line for that same tax (so switching a tax on/off is safe to repeat).
+        """
+        from decimal import Decimal
+        base = self.get_subtotal() - (self.discount or Decimal('0'))
+        if base < 0:
+            base = Decimal('0')
+        line, _ = OrderTax.objects.update_or_create(
+            order=self,
+            tax_rate=tax_rate,
+            defaults={
+                'name': tax_rate.name,
+                'rate': tax_rate.rate,
+                'fixed_amount': tax_rate.fixed_amount,
+                'tax_type': tax_rate.tax_type,
+                'amount': tax_rate.compute_amount(base),
+            },
+        )
+        # Keep the legacy tax_percentage field in sync so older screens/reports
+        # that still read it continue to show the right tax.
+        self.recalculate_taxes()
+        return line
+
+    def remove_tax(self, tax_rate):
+        """Remove a tax line from this order."""
+        self.tax_lines.filter(tax_rate=tax_rate).delete()
+        self.recalculate_taxes()
+
+    def clear_taxes(self):
+        self.tax_lines.all().delete()
+
+    def recalculate_taxes(self):
+        """
+        Recompute every tax line against the current subtotal/discount, and keep the
+        legacy tax_percentage field in sync (sum of percentage taxes) so older
+        screens and reports continue to show the correct tax.
+        """
+        from decimal import Decimal
+        base = self.get_subtotal() - (self.discount or Decimal('0'))
+        if base < 0:
+            base = Decimal('0')
+
+        percent_total = Decimal('0')
+        for line in self.tax_lines.select_related('tax_rate').all():
+            if line.tax_type == 'fixed':
+                line.amount = line.fixed_amount
+            else:
+                taxable = base if (line.tax_rate and line.tax_rate.applies_after_discount) else self.get_subtotal()
+                line.amount = ((taxable * (line.rate or Decimal('0'))) / Decimal('100')).quantize(Decimal('0.01'))
+                percent_total += line.rate or Decimal('0')
+            line.save(update_fields=['amount'])
+
+        if self.tax_lines.exists():
+            self.tax_percentage = percent_total
+            super().save(update_fields=['tax_percentage'])
+        return self.get_tax_total()
+
+    # ---------- Display helpers (bills, receipts, screens) ----------
+    def tax_display_lines(self):
+        """
+        The tax lines to print on a bill/receipt/detail screen.
+
+        Normally the saved OrderTax rows. Orders created before multi-tax support
+        have no rows, so one synthetic line is built from the legacy tax_percentage
+        field and old bills keep printing exactly what they always printed.
+        """
+        from decimal import Decimal
+        lines = list(self.tax_lines.all())
+        if lines:
+            return lines
+        percentage = self.tax_percentage or Decimal('0')
+        if not percentage:
+            return []
+        return [OrderTax(
+            order=self,
+            name='Tax',
+            rate=percentage,
+            tax_type='percent',
+            amount=self.get_tax_total(),
+        )]
     
     def save(self, *args, **kwargs):
         import time, random
@@ -312,7 +547,7 @@ class Order(models.Model):
                         # Next order number
                         self.number = f"{prefix}-{last_seq + 1:04d}"
 
-                        # ── TOKEN: only if one wasn't pre-supplied (tables pass session token) ──
+                        # â”€â”€ TOKEN: only if one wasn't pre-supplied (tables pass session token) â”€â”€
                         if not self.token_number:
                             # === CHANGED: Use the centralized token utility ===
                             # This ensures it respects the dynamic day start time and global sequence
@@ -340,6 +575,27 @@ class Order(models.Model):
 
 from decimal import Decimal
 
+class OrderItemModifier(models.Model):
+    """
+    A modifier chosen for a line on an order. Name/price are snapshotted so that
+    later edits to the modifier definition never rewrite past bills.
+    """
+    order_item = models.ForeignKey('OrderItem', on_delete=models.CASCADE, related_name='modifiers')
+    modifier = models.ForeignKey(Modifier, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name="order_item_modifiers")
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        verbose_name = "Order Item Modifier"
+        verbose_name_plural = "Order Item Modifiers"
+
+    def __str__(self):
+        return self.name
+
+
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     menu_item = models.ForeignKey(MenuItem, on_delete=models.PROTECT, null=True, blank=True)
@@ -349,47 +605,88 @@ class OrderItem(models.Model):
     token_printed = models.BooleanField(default=False)
     printed_quantity = models.PositiveIntegerField(default=0)
 
+    def modifiers_total(self):
+        """Combined price of every modifier chosen on this line."""
+        from decimal import Decimal
+        return sum((m.price for m in self.modifiers.all()), Decimal('0'))
+
+    def effective_unit_price(self):
+        """Unit price including modifiers (modifiers are charged per item)."""
+        from decimal import Decimal
+        return (self.unit_price or Decimal('0')) + self.modifiers_total()
+
     def line_total(self):
-        return self.quantity * self.unit_price
+        return self.quantity * self.effective_unit_price()
+
+    def modifier_summary(self):
+        """Readable list of the modifiers chosen on this line, e.g. 'Large + Extra Cheese'."""
+        return ' + '.join(m.name for m in self.modifiers.all())
 
     def update_inventory_usage(self):
-        # only do this for a menu_item that actually has a recipe
-        if not self.menu_item:
-            return
+        """Deduct raw materials for this line via the standard costing engine.
 
-        try:
-            recipe = self.menu_item.recipe
-        except Recipe.DoesNotExist:
-            return
-
-        # loop each raw-material line on the recipe
-        for ingr in recipe.raw_ingredients.select_related('raw_material', 'unit').all():
-            # look up the conversion factor for this raw_material + unit
+        Uses costing.usage_map() so yield, wastage, unit conversion and nested
+        sub-recipes are honoured. Deals explode into their component menu items.
+        Quantity stored on the transaction is in each material's STOCK unit.
+        """
+        from .costing import usage_map
+        targets = []
+        if self.menu_item_id:
+            targets.append((self.menu_item, self.quantity or 0))
+        elif self.deal_id:
             try:
-                conv_obj = RawMaterialUnitConversion.objects.get(
-                    raw_material=ingr.raw_material,
-                    unit=ingr.unit
+                for di in self.deal.items.through.objects.filter(deal_id=self.deal_id).select_related('menu_item'):
+                    targets.append((di.menu_item, (self.quantity or 0) * (di.quantity or 0)))
+            except Exception:
+                return
+        else:
+            return
+        for menu_item, qty in targets:
+            if not menu_item or not qty:
+                continue
+            try:
+                recipe = menu_item.recipe
+            except Exception:
+                continue
+            if recipe is None:
+                continue
+            try:
+                usage = usage_map(recipe, portions=qty)
+            except Exception:
+                continue
+            from decimal import Decimal
+            for rm_id, need in usage.items():
+                try:
+                    rm = RawMaterial.objects.get(pk=rm_id)
+                except RawMaterial.DoesNotExist:
+                    continue
+                used = need.quantize(Decimal('0.01')) if need else Decimal('0')
+                if not used:
+                    continue
+                InventoryTransaction.objects.create(
+                    raw_material=rm,
+                    transaction_type='out',
+                    quantity=used,
+                    order_item=self,
+                    notes=f"Used in {menu_item.name} (Order #{self.order.number})",
                 )
-                conv = Decimal(conv_obj.to_base_factor)
-            except RawMaterialUnitConversion.DoesNotExist:
-                # fallback to 1:1 if no conversion is defined
-                conv = Decimal('1')
 
-            # total raw needed = (recipe-line qty × unit→base) × order quantity
-            used_qty = Decimal(ingr.quantity) * conv * self.quantity
+    def reverse_inventory_usage(self):
+        """Return previously deducted stock (used when a line is edited/deleted).
 
-            InventoryTransaction.objects.create(
-                raw_material     = ingr.raw_material,
-                transaction_type = 'out',
-                quantity         = used_qty,
-                order_item       = self,
-                notes            = f"Used in {self.menu_item.name} (Order #{self.order.number})"
-            )
+        Rows are removed one at a time on purpose: QuerySet.delete() performs a
+        bulk delete that *skips* InventoryTransaction.delete(), and that override
+        is what actually credits the stock back. Using the queryset here left
+        stock permanently short every time a line was edited or voided.
+        """
+        for txn in list(InventoryTransaction.objects.filter(
+                order_item=self, transaction_type='out')):
+            txn.delete()
 
     def save(self, *args, **kwargs):
         # Save the OrderItem first
         super().save(*args, **kwargs)
-        
+
         # Then update inventory usage
         self.update_inventory_usage()
 
@@ -415,17 +712,132 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Payment for Order #{self.order.number} – {self.get_method_display()}"
+        return f"Payment for Order #{self.order.number} â€“ {self.get_method_display()}"
 
 
 # ---------- Settings & Configuration (unchanged) ----------
 class TaxRate(models.Model):
-    name = models.CharField(max_length=100)
-    rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="e.g. 7.50 for 7.5%")
-    active = models.BooleanField(default=True)
+    """
+    A reusable tax that can be applied to orders (VAT, WHT, Service Levy, ...).
+    Several may be active at once; each order keeps its own snapshot of the
+    taxes actually charged, so later edits here never rewrite past bills.
+    """
+    TAX_TYPES = [
+        ('percent', 'Percentage'),
+        ('fixed', 'Fixed Amount'),
+    ]
+
+    name = models.CharField(max_length=100, unique=True, help_text="e.g. VAT, WHT, Service Levy")
+    rate = models.DecimalField(max_digits=5, decimal_places=2, default=0,
+                               help_text="Percent, e.g. 7.50 for 7.5% (used when type is Percentage)")
+    fixed_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+                                       help_text="Flat amount added to the bill (used when type is Fixed Amount)")
+    tax_type = models.CharField(max_length=10, choices=TAX_TYPES, default='percent')
+    active = models.BooleanField(default=True, help_text="Uncheck to hide from new orders (existing orders keep it)")
+    is_default = models.BooleanField(default=False, help_text="Pre-selected when creating a new order")
+    is_optional = models.BooleanField(default=True, help_text="Cashier may switch this tax off for an order")
+    applies_after_discount = models.BooleanField(
+        default=True, help_text="Calculate on the discounted subtotal instead of the full subtotal")
+    sort_order = models.IntegerField(default=0, help_text="Lower numbers are applied/applied first")
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+        verbose_name = "Tax"
+        verbose_name_plural = "Taxes"
 
     def __str__(self):
+        if self.tax_type == 'fixed':
+            return f"{self.name} (fixed)"
         return f"{self.name} ({self.rate}%)"
+
+    def compute_amount(self, taxable_base):
+        """Amount this tax adds to the given base (discounted subtotal)."""
+        from decimal import Decimal
+        base = Decimal(str(taxable_base or 0))
+        if self.tax_type == 'fixed':
+            return self.fixed_amount
+        return (base * (self.rate or Decimal('0')) / Decimal('100')).quantize(Decimal('0.01'))
+
+
+class OrderTax(models.Model):
+    """
+    A tax line applied to one order. Name/rate are snapshotted from TaxRate at the
+    time of sale so historical bills never change when a tax is edited later.
+    """
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='tax_lines')
+    tax_rate = models.ForeignKey(TaxRate, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name="order_taxes")
+    name = models.CharField(max_length=100)
+    rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    fixed_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tax_type = models.CharField(max_length=10, choices=TaxRate.TAX_TYPES, default='percent')
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_at = models.DateField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        verbose_name = "Order Tax Line"
+        verbose_name_plural = "Order Tax Lines"
+
+    def __str__(self):
+        return f"{self.name} on Order #{self.order.number}: {self.amount}"
+
+
+class OrderHold(models.Model):
+    """
+    A parked ("held") order.
+
+    A cashier building a long bill can park it here and start another one, then
+    recall it later without losing a single line. The items are stored as a JSON
+    snapshot - deliberately *not* a real Order - so a held bill never consumes
+    stock, never gets a token number and never shows up in the day's sales.
+    """
+    label = models.CharField(
+        max_length=80,
+        help_text='Short name the cashier will recognise, e.g. "Table 5 - Rahim"',
+    )
+    table = models.ForeignKey(
+        Table, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='holds', help_text='Optional table this bill belongs to',
+    )
+    items = models.JSONField(default=list, help_text='Snapshot of the cart lines')
+    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    service_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tax_ids = models.JSONField(default=list, help_text='Taxes ticked when the bill was parked')
+    is_active = models.BooleanField(
+        default=True, help_text='Uncheck once the held bill has been served',
+    )
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='order_holds')
+    created_at = models.DateTimeField(auto_now_add=True)
+    recalled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Held Order'
+        verbose_name_plural = 'Held Orders'
+
+    def __str__(self):
+        return f'{self.label} ({self.created_at:%d-%b %H:%M})'
+
+    @property
+    def item_count(self):
+        """How many lines the held bill has, shown in the recall list."""
+        return len(self.items or [])
+
+    @property
+    def total(self):
+        """Snapshot subtotal, recomputed from the parked lines."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for line in self.items or []:
+            try:
+                unit = Decimal(str(line.get('unit_price', 0) or 0))
+                quantity = Decimal(str(line.get('quantity', 1) or 1))
+                modifiers = Decimal(str(line.get('modifiers_total', 0) or 0))
+            except Exception:
+                continue
+            total += quantity * (unit + modifiers)
+        return total
 
 
 class DiscountRule(models.Model):
@@ -476,14 +888,112 @@ class Supplier(models.Model):
 
 class RawMaterial(models.Model):
     name = models.CharField(max_length=100, unique=True)
+    # Legacy free-text unit (kept for migration compat, synced from stock_unit).
     unit = models.CharField(max_length=50, help_text="E.g. kg, liter, pc")
+    # Standard costing units: stock_unit is what inventory is tracked in,
+    # purchase_unit is what suppliers sell in (converted via pack_size / Unit factors).
+    stock_unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name='stock_materials', null=True, blank=True)
+    purchase_unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name='purchase_materials', null=True, blank=True)
+    pack_size = models.DecimalField(max_digits=12, decimal_places=3, default=1,
+        help_text="How many stock units are in one purchase unit (e.g. 1 bag = 25000 g).")
     current_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     reorder_level = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name="materials")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name} ({self.unit})"
+        sym = getattr(self.stock_unit, 'symbol', None) or self.unit
+        return f"{self.name} ({sym})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.stock_unit and self.purchase_unit:
+            if self.stock_unit.unit_type != self.purchase_unit.unit_type:
+                # Allow count<->mass/volume only via pack_size? No: block mismatched families.
+                raise ValidationError('Stock and purchase units must be the same family (mass/volume/count).')
+        if (self.pack_size or 0) <= 0:
+            raise ValidationError('Pack size must be greater than zero.')
+
+    def save(self, *args, **kwargs):
+        # Keep legacy `unit` text in sync so old templates/reports keep working.
+        if self.stock_unit_id:
+            try:
+                sym = Unit.objects.filter(pk=self.stock_unit_id).values_list('symbol', flat=True).first()
+                if sym:
+                    self.unit = sym
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+    @property
+    def stock_symbol(self):
+        return getattr(self.stock_unit, 'symbol', None) or self.unit
+
+    @property
+    def avg_cost_per_stock_unit(self):
+        try:
+            from .costing import raw_avg_cost
+            return raw_avg_cost(self)
+        except Exception:
+            from decimal import Decimal as _D
+            return _D('0')
+
+    @property
+    def latest_cost_per_stock_unit(self):
+        try:
+            from .costing import latest_price
+            return latest_price(self)
+        except Exception:
+            from decimal import Decimal as _D2
+            return _D2('0')
+
+    # ---------- Low stock helpers ----------
+    @property
+    def is_low_stock(self):
+        """True when stock has fallen to (or below) the reorder level."""
+        return self.current_stock <= self.reorder_level
+
+    @property
+    def is_out_of_stock(self):
+        return self.current_stock <= 0
+
+    @property
+    def stock_status(self):
+        if self.is_out_of_stock:
+            return 'out'
+        if self.is_low_stock:
+            return 'low'
+        return 'ok'
+
+    @property
+    def shortage(self):
+        """How much is missing to get back to the reorder level."""
+        from decimal import Decimal
+        gap = (self.reorder_level or Decimal('0')) - (self.current_stock or Decimal('0'))
+        return gap if gap > 0 else Decimal('0')
+
+    @property
+    def suggested_order_qty(self):
+        """
+        A sensible quantity to order: top the item up to twice its reorder level,
+        so there is room before the next delivery.
+        """
+        from decimal import Decimal
+        level = self.reorder_level or Decimal('0')
+        if level <= 0:
+            return Decimal('0')
+        target = level * 2
+        gap = target - (self.current_stock or Decimal('0'))
+        return gap if gap > 0 else Decimal('0')
+
+    @property
+    def estimated_cost(self):
+        """Cost of the suggested order using the most recent purchase price."""
+        from decimal import Decimal
+        last = self.purchaseorderitem_set.order_by('-id').first()
+        if not last:
+            return Decimal('0')
+        return self.suggested_order_qty * (last.unit_price or Decimal('0'))
 
 
 
@@ -528,6 +1038,30 @@ class PurchaseOrder(models.Model):
         self.recompute_totals()
         self.save(update_fields=['total_cost', 'net_total'])
 
+    def mark_received(self):
+        """
+        Flag this purchase order as received.
+
+        Stock is already added when each line is first saved, so this only
+        updates the status - it must not add stock again or stock is double counted.
+        """
+        if self.status != 'received':
+            self.status = 'received'
+            self.save(update_fields=['status'])
+        return self
+
+    def delete(self, *args, **kwargs):
+        """Delete the PO and hand the stock back.
+
+        Each line has to be deleted individually: Django's cascade collector does
+        a bulk delete which skips PurchaseOrderItem.delete(), and that override is
+        what writes the 'return' row that removes the stock this PO added.
+        Deleting the header alone left stock permanently inflated.
+        """
+        for item in list(self.items.all()):
+            item.delete()
+        return super().delete(*args, **kwargs)
+
 
 class PurchaseOrderItem(models.Model):
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE,
@@ -535,30 +1069,68 @@ class PurchaseOrderItem(models.Model):
     raw_material   = models.ForeignKey(RawMaterial, on_delete=models.PROTECT)
     quantity       = models.DecimalField(max_digits=10, decimal_places=2)
     unit_price     = models.DecimalField(max_digits=10, decimal_places=2)
+    # Unit the supplier sells in; stock added = quantity x pack/unit conversion.
+    purchase_unit  = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name='po_lines', null=True, blank=True)
 
     def total_cost(self):
         return self.quantity * self.unit_price
 
+    @property
+    def stock_qty(self):
+        """Quantity converted into the material's stock unit."""
+        from decimal import Decimal
+        from .costing import conversion_factor
+        rm = self.raw_material
+        pu = self.purchase_unit or getattr(rm, 'purchase_unit', None) or getattr(rm, 'stock_unit', None)
+        f = conversion_factor(pu, rm.stock_unit)
+        if not f:
+            # purchase_unit and stock_unit in different families: use pack_size.
+            try:
+                f = Decimal(str(getattr(rm, 'pack_size', 1) or 1))
+            except Exception:
+                f = Decimal('1')
+        return (Decimal(str(self.quantity or 0)) * f)
+
+    @property
+    def unit_price_per_stock(self):
+        from decimal import Decimal
+        sq = self.stock_qty
+        if not sq:
+            return Decimal('0')
+        return (Decimal(str(self.quantity or 0)) * Decimal(str(self.unit_price or 0)) / sq)
+
     def save(self, *args, **kwargs):
-            super().save(*args, **kwargs)
-            # auto add stock‑in transaction WITH a back‑link
+        if not self.purchase_unit_id:
+            try:
+                rm = RawMaterial.objects.filter(pk=self.raw_material_id).first()
+                if rm is not None and rm.purchase_unit_id:
+                    self.purchase_unit_id = rm.purchase_unit_id
+            except Exception:
+                pass
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        # Add stock only the FIRST time this line is saved. Without the
+        # _state.adding guard every later edit re-added the same quantity
+        # and quietly inflated stock levels. Quantity is stored in STOCK units.
+        if is_new:
             InventoryTransaction.objects.create(
                 raw_material       = self.raw_material,
                 transaction_type   = 'in',
-                quantity           = self.quantity,
-                purchase_order_item= self,              # ← link back
-                notes              = f"PO #{self.purchase_order.id}"
+                quantity           = self.stock_qty,
+                purchase_order_item= self,
+                notes              = f"PO #{self.purchase_order_id}"
             )
     def delete(self, *args, **kwargs):
-        # create a 'return' to reverse previous 'in'
-        InventoryTransaction.objects.create(
-            raw_material=self.raw_material,
-            transaction_type='return',
-            quantity=self.quantity,
-            purchase_order_item=None,
-            notes=f"Reversal (delete) PO #{self.purchase_order.id}"
-        )
-        super().delete(*args, **kwargs)
+        # Undo the stock this line added. Simply writing a 'return' row is wrong:
+        # 'return' ADDS stock while the original 'in' row survives (its FK is
+        # SET_NULL, not CASCADE), so the quantity was counted twice and deleting
+        # a PO line inflated levels instead of reversing them. Deleting the 'in'
+        # row restores the stock exactly - one at a time, because QuerySet.delete()
+        # would skip InventoryTransaction.delete() and its F() reversal.
+        for txn in list(InventoryTransaction.objects.filter(
+                purchase_order_item=self, transaction_type='in')):
+            txn.delete()
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.quantity} x {self.raw_material.name}"
@@ -568,23 +1140,42 @@ class Recipe(models.Model):
     menu_item  = models.OneToOneField(MenuItem, on_delete=models.CASCADE,
                                       related_name='recipe')
     name       = models.CharField(max_length=150, blank=True)
+    # Standard production fields: one recipe batch makes yield_qty portions;
+    # wastage_percent inflates the true cost per portion.
+    yield_qty = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    yield_unit = models.CharField(max_length=20, default='portion')
+    wastage_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    instructions = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Recipe for {self.menu_item.name}"
 
+    def cost_breakdown(self):
+        from .costing import recipe_breakdown
+        return recipe_breakdown(self)
+
+    @property
+    def estimated_cost(self):
+        from .costing import recipe_cost
+        return recipe_cost(self)
+
+    @property
+    def cost_per_portion(self):
+        return self.estimated_cost
+
+    def refresh_menu_cost(self):
+        from .costing import refresh_cost
+        return refresh_cost(self.menu_item)
+
     def total_grams(self):
-        """
-        Sum all ingredients & sub-recipes (in grams) for cost & usage.
-        """
-        total = 0
-        for ingr in self.raw_ingredients.all():
-            conv = ingr.unit.to_base_factor
-            total += ingr.quantity * conv
-        for sub in self.subrecipes.all():
-            total += sub.sub_recipe.total_grams() * float(sub.quantity)
-        return total
+        """Legacy helper (kept for compat). Use cost_breakdown() instead."""
+        try:
+            bd = self.cost_breakdown()
+            return float(sum((l.get('stock_qty') or 0) for l in bd['lines']))
+        except Exception:
+            return 0
 
 class RecipeRawMaterial(models.Model):
     recipe       = models.ForeignKey(Recipe, on_delete=models.CASCADE,
@@ -601,11 +1192,17 @@ class RecipeSubRecipe(models.Model):
     recipe     = models.ForeignKey(Recipe, on_delete=models.CASCADE,
                                    related_name='subrecipes')
     sub_recipe = models.ForeignKey(Recipe, on_delete=models.PROTECT)
+    # Quantity is in PORTIONS of the sub-recipe (not a weight unit).
     quantity   = models.DecimalField(max_digits=10, decimal_places=3)
-    unit       = models.ForeignKey(Unit, on_delete=models.PROTECT)
+    unit       = models.ForeignKey(Unit, on_delete=models.PROTECT, null=True, blank=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.recipe_id and self.sub_recipe_id and self.recipe_id == self.sub_recipe_id:
+            raise ValidationError('A recipe cannot contain itself.')
 
     def __str__(self):
-        return f"{self.quantity} {self.unit.symbol} of {self.sub_recipe.menu_item.name}"
+        return f"{self.quantity} portion(s) of {self.sub_recipe.menu_item.name}"
 
 class InventoryTransaction(models.Model):
     TRANSACTION_TYPES = [
@@ -620,7 +1217,7 @@ class InventoryTransaction(models.Model):
     quantity            = models.DecimalField(max_digits=10, decimal_places=2)
     timestamp           = models.DateTimeField(auto_now_add=True)
     notes               = models.TextField(blank=True)
-    # optional back‐links
+    # optional backâ€links
     purchase_order_item = models.ForeignKey(PurchaseOrderItem,
                                             on_delete=models.SET_NULL,
                                             null=True, blank=True)
@@ -629,28 +1226,42 @@ class InventoryTransaction(models.Model):
                                             null=True, blank=True)
 
     def save(self, *args, **kwargs):
+        from decimal import Decimal
+        from django.db.models import F
         super().save(*args, **kwargs)
-        # maintain current stock
+        # Maintain current_stock atomically so parallel sales cannot lose updates.
+        qty = self.quantity or Decimal('0')
         if self.transaction_type == 'in':
-            self.raw_material.current_stock += self.quantity
+            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
         elif self.transaction_type in ['out']:
-            self.raw_material.current_stock -= self.quantity
+            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') - qty)
         elif self.transaction_type == 'return':
-            self.raw_material.current_stock += self.quantity
-        self.raw_material.save()
+            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
+
+    def delete(self, *args, **kwargs):
+        from decimal import Decimal
+        from django.db.models import F
+        qty = self.quantity or Decimal('0')
+        pk = self.raw_material_id
+        super().delete(*args, **kwargs)
+        # Deleting an 'out' row returns the stock (used by order-edit reversal).
+        if self.transaction_type == 'out':
+            RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') + qty)
+        elif self.transaction_type in ('in', 'return'):
+            RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') - qty)
 
     def __str__(self):
-        return f"{self.get_transaction_type_display()} – {self.raw_material.name}: {self.quantity} {self.raw_material.unit}"
+        return f"{self.get_transaction_type_display()} â€“ {self.raw_material.name}: {self.quantity} {self.raw_material.unit}"
 
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 # a dictionary of all the units you support, with their
-# “to base” factor (base = grams for mass, milliliters for volume).
-#    e.g.  1 kg → 1000 g,   1 g → 1 g
-#          1 l  → 1000 ml,  1 ml→1 ml
-#          1 tbsp→15 ml,    1 tsp→5 ml,  1 cup→240 ml
+# â€œto baseâ€ factor (base = grams for mass, milliliters for volume).
+#    e.g.  1â€¯kg â†’ 1000â€¯g,   1â€¯g â†’ 1â€¯g
+#          1â€¯l  â†’ 1000â€¯ml,  1â€¯mlâ†’1â€¯ml
+#          1â€¯tbspâ†’15â€¯ml,    1â€¯tspâ†’5â€¯ml,  1â€¯cupâ†’240â€¯ml
 DEFAULT_FACTORS = {
   'kg': 1000, 'g': 1,
   'l': 1000, 'ml': 1,
@@ -742,7 +1353,7 @@ class BankAccount(models.Model):
 
     def __str__(self):
         label = self.bank_name or "Bank"
-        return f"{label} — {self.name}"
+        return f"{label} â€” {self.name}"
 
     @property
     def current_balance(self):
@@ -781,7 +1392,7 @@ class CashFlow(models.Model):
 
     def __str__(self):
         side = "Bank" if self.bank_account else "Cash"
-        return f"{self.date} — {self.get_flow_type_display()} {self.amount} ({side})"
+        return f"{self.date} â€” {self.get_flow_type_display()} {self.amount} ({side})"
 
 
 class BankMovement(models.Model):
@@ -789,15 +1400,15 @@ class BankMovement(models.Model):
     A single logical movement that can touch CASH and/or BANK,
     writing matching rows to CashFlow so reports stay consistent.
     """
-    DEPOSIT   = 'deposit'    # cash → bank
-    WITHDRAW  = 'withdraw'   # bank → cash
-    TRANSFER  = 'transfer'   # bank A → bank B
+    DEPOSIT   = 'deposit'    # cash â†’ bank
+    WITHDRAW  = 'withdraw'   # bank â†’ cash
+    TRANSFER  = 'transfer'   # bank A â†’ bank B
     FEE       = 'fee'        # bank fee (out)
     INTEREST  = 'interest'   # bank interest (in)
     TYPES = [
-        (DEPOSIT,  'Deposit (Cash → Bank)'),
-        (WITHDRAW, 'Withdraw (Bank → Cash)'),
-        (TRANSFER, 'Transfer (Bank → Bank)'),
+        (DEPOSIT,  'Deposit (Cash â†’ Bank)'),
+        (WITHDRAW, 'Withdraw (Bank â†’ Cash)'),
+        (TRANSFER, 'Transfer (Bank â†’ Bank)'),
         (FEE,      'Bank Fee (Out)'),
         (INTEREST, 'Interest (In)'),
     ]
@@ -822,7 +1433,7 @@ class BankMovement(models.Model):
         ordering = ['-date', '-id']
 
     def __str__(self):
-        return f"{self.get_movement_type_display()} — {self.amount} on {self.date}"
+        return f"{self.get_movement_type_display()} â€” {self.amount} on {self.date}"
 
     def clean(self):
         # basic rule checks
@@ -1020,7 +1631,7 @@ class Expense(models.Model):
     purchase_order = models.ForeignKey('PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
 
     def __str__(self):
-        return f"{self.date} — {self.get_category_display()} — ₨{self.amount}"
+        return f"{self.date} â€” {self.get_category_display()} â€” â‚¨{self.amount}"
 
     # --- Validation rules ---
     def clean(self):
@@ -1055,7 +1666,7 @@ class Expense(models.Model):
         # Create/update the CashFlow record
         desc = f"Expense: {self.get_category_display()}"
         if self.description:
-            desc += f" — {self.description}"
+            desc += f" â€” {self.description}"
 
         if not self.cashflow:
             cf = CashFlow.objects.create(
@@ -1110,7 +1721,7 @@ class KitchenVoucher(models.Model):
         indexes = [models.Index(fields=['vtype','date'])]
 
     def __str__(self):
-        return f"KV#{self.id} — {self.get_vtype_display()} — {self.date}"
+        return f"KV#{self.id} â€” {self.get_vtype_display()} â€” {self.date}"
 
     @transaction.atomic
     def sync_transactions(self):

@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Low Stock & Reordering{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0"><i class="fa fa-exclamation-triangle text-danger"></i> Low Stock &amp; Reordering</h3>
+    <div>
+      <a href="{% url 'raw_material_list' %}" class="btn btn-secondary btn-sm">
+        <i class="fa fa-boxes"></i> All Raw Materials
+      </a>
+      <a href="{% url 'purchase_order_create' %}" class="btn btn-primary btn-sm">
+        <i class="fa fa-cart-plus"></i> New Purchase Order
+      </a>
+    </div>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-4">
+      <div class="card border-danger">
+        <div class="card-body py-2">
+          <strong>Out of stock</strong>
+          <span class="badge bg-danger float-end">{{ out_count }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card border-warning">
+        <div class="card-body py-2">
+          <strong>Low stock</strong>
+          <span class="badge bg-warning text-dark float-end">{{ low_count }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body py-2">
+          <strong>Estimated order cost</strong>
+          <span class="float-end">{{ CURRENCY_SYMBOL }}{{ total_estimated_cost|floatformat:2 }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if out_items or low_items %}
+    <h5 class="mt-3">Needs reordering</h5>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Material</th>
+            <th>Supplier</th>
+            <th class="text-end">In stock</th>
+            <th class="text-end">Reorder level</th>
+            <th class="text-end">Suggested order</th>
+            <th class="text-end">Est. cost</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in out_items %}
+            <tr class="table-danger">
+              <td><strong>{{ m.name }}</strong></td>
+              <td>{{ m.supplier.name }}</td>
+              <td class="text-end">{{ m.current_stock }} {{ m.unit }}</td>
+              <td class="text-end">{{ m.reorder_level }} {{ m.unit }}</td>
+              <td class="text-end">{{ m.suggested_order_qty }} {{ m.unit }}</td>
+              <td class="text-end">{{ CURRENCY_SYMBOL }}{{ m.estimated_cost|floatformat:2 }}</td>
+              <td><a class="btn btn-sm btn-outline-primary"
+                     href="{% url 'purchase_order_create' %}?supplier={{ m.supplier_id }}&amp;material={{ m.id }}">Order</a></td>
+            </tr>
+          {% endfor %}
+          {% for m in low_items %}
+            <tr class="table-warning">
+              <td>{{ m.name }}</td>
+              <td>{{ m.supplier.name }}</td>
+              <td class="text-end">{{ m.current_stock }} {{ m.unit }}</td>
+              <td class="text-end">{{ m.reorder_level }} {{ m.unit }}</td>
+              <td class="text-end">{{ m.suggested_order_qty }} {{ m.unit }}</td>
+              <td class="text-end">{{ CURRENCY_SYMBOL }}{{ m.estimated_cost|floatformat:2 }}</td>
+              <td><a class="btn btn-sm btn-outline-primary"
+                     href="{% url 'purchase_order_create' %}?supplier={{ m.supplier_id }}&amp;material={{ m.id }}">Order</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if suppliers %}
+      <p class="text-muted small mt-2">
+        Suppliers involved: {% for s in suppliers %}{{ s.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      </p>
+    {% endif %}
+  {% else %}
+    <div class="alert alert-success">
+      <i class="fa fa-check-circle"></i>
+      Nothing is below its reorder level.
+      {% if untracked_items %}
+        Note: {{ untracked_items|length }} material(s) have no reorder level set, so they are not monitored.
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if untracked_items %}
+    <details class="mt-3">
+      <summary class="text-muted">Not monitored ({{ untracked_items|length }}) — set a reorder level to track these</summary>
+      <ul class="small mt-2">
+        {% for m in untracked_items %}
+          <li>
+            {{ m.name }} ({{ m.unit }}) — stock {{ m.current_stock }}
+            <a href="{% url 'raw_material_edit' m.pk %}">set level</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+
+</div>
+{% endblock %}

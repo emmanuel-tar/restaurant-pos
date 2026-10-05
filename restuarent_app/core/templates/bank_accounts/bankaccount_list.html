@@ -24,8 +24,8 @@
           </div>
           <div class="small text-muted">{{ acc.bank_name }} — {{ acc.branch }}</div>
           <div class="mt-2"><strong>Account #:</strong> {{ acc.account_number|default:"—" }}</div>
-          <div class="mt-2"><strong>Opening Balance:</strong> ₨ {{ acc.opening_balance|floatformat:2 }}</div>
-          <div class="mt-2"><strong>Current Balance:</strong> ₨ {{ acc.current_balance|floatformat:2 }}</div>
+          <div class="mt-2"><strong>Opening Balance:</strong> {{ CURRENCY_SYMBOL }} {{ acc.opening_balance|floatformat:2 }}</div>
+          <div class="mt-2"><strong>Current Balance:</strong> {{ CURRENCY_SYMBOL }} {{ acc.current_balance|floatformat:2 }}</div>
         </div>
         <div class="card-footer d-flex gap-2">
           <a class="btn btn-sm btn-outline-primary" href="{% url 'bankaccount_update' acc.pk %}">

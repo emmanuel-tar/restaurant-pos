@@ -54,15 +54,15 @@
       <div class="card">
         <div class="card-header"><strong>Totals</strong></div>
         <div class="card-body">
-          <div class="d-flex justify-content-between"><span>Subtotal</span><span>₨ {{ order.total_cost }}</span></div>
+          <div class="d-flex justify-content-between"><span>Subtotal</span><span>{{ CURRENCY_SYMBOL }} {{ order.total_cost }}</span></div>
           <div class="d-flex justify-content-between"><span>Tax %</span><span>{{ order.tax_percent }}%</span></div>
           <div class="d-flex justify-content-between"><span>Discount %</span><span>{{ order.discount_percent }}%</span></div>
           <hr>
-          <div class="d-flex justify-content-between"><strong>Net Total</strong><strong>₨ {{ order.net_total }}</strong></div>
+          <div class="d-flex justify-content-between"><strong>Net Total</strong><strong>{{ CURRENCY_SYMBOL }} {{ order.net_total }}</strong></div>
           <hr>
-          <div class="d-flex justify-content-between"><span>Previous Due</span><span>₨ {{ previous_due }}</span></div>
-          <div class="d-flex justify-content-between"><span>Paid (this PO)</span><span>₨ {{ paid_sum }}</span></div>
-          <div class="d-flex justify-content-between"><strong>Remaining After</strong><strong>₨ {{ remaining_after }}</strong></div>
+          <div class="d-flex justify-content-between"><span>Previous Due</span><span>{{ CURRENCY_SYMBOL }} {{ previous_due }}</span></div>
+          <div class="d-flex justify-content-between"><span>Paid (this PO)</span><span>{{ CURRENCY_SYMBOL }} {{ paid_sum }}</span></div>
+          <div class="d-flex justify-content-between"><strong>Remaining After</strong><strong>{{ CURRENCY_SYMBOL }} {{ remaining_after }}</strong></div>
         </div>
       </div>
 
@@ -72,7 +72,7 @@
           {% if payments %}
             <ul class="mb-0">
               {% for p in payments %}
-                <li>₨ {{ p.amount }} — {{ p.get_payment_source_display }} {% if p.bank_account %} ({{ p.bank_account }}){% endif %} <span class="text-muted">on {{ p.created_at|date:"Y-m-d H:i" }}</span></li>
+                <li>{{ CURRENCY_SYMBOL }} {{ p.amount }} — {{ p.get_payment_source_display }} {% if p.bank_account %} ({{ p.bank_account }}){% endif %} <span class="text-muted">on {{ p.created_at|date:"Y-m-d H:i" }}</span></li>
               {% endfor %}
             </ul>
           {% else %}

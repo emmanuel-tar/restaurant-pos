@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header">
+  <h1>Taxes</h1>
+  <div>
+    <a href="{% url 'modifiergroup_list' %}" class="btn">
+      <i class="fa fa-sliders"></i> Modifier Groups
+    </a>
+    <a href="{% url 'taxrate_create' %}" class="btn">
+      <i class="fa fa-plus"></i> New Tax
+    </a>
+  </div>
+</div>
+
+<p class="text-muted">
+  Taxes set up here appear as tick boxes on the order screen, so the cashier can
+  turn any combination of them on for each bill.
+</p>
+
+<form id="search-form" class="search-bar">
+  <input name="q" placeholder="Search taxes..." value="{{ request.GET.q }}">
+  <button type="submit"><i class="fa fa-search"></i></button>
+</form>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Name</th><th>Type</th><th>Value</th><th>After discount</th>
+      <th>Default</th><th>Active</th><th>Order</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for tax in taxes %}
+    <tr id="tax-{{ tax.pk }}">
+      <td>{{ tax.name }}</td>
+      <td>{{ tax.get_tax_type_display }}</td>
+      <td>
+        {% if tax.tax_type == 'fixed' %}{{ tax.fixed_amount|floatformat:2 }}
+        {% else %}{{ tax.rate|floatformat:"-2" }}%{% endif %}
+      </td>
+      <td>{% if tax.applies_after_discount %}<span class="badge badge-success">Yes</span>
+          {% else %}<span class="badge badge-secondary">No</span>{% endif %}</td>
+      <td>{% if tax.is_default %}<span class="badge badge-success">Yes</span>
+          {% else %}<span class="badge badge-secondary">No</span>{% endif %}</td>
+      <td>{% if tax.active %}<span class="badge badge-success">Yes</span>
+          {% else %}<span class="badge badge-secondary">No</span>{% endif %}</td>
+      <td>{{ tax.sort_order }}</td>
+      <td>
+        <a href="{% url 'taxrate_edit' tax.pk %}" class="btn-edit"><i class="fa fa-edit"></i></a>
+        <button class="btn-delete" data-url="{% url 'taxrate_delete' tax.pk %}"><i class="fa fa-trash"></i></button>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8">No taxes configured yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if is_paginated %}
+<div class="pagination">
+  {% if page_obj.has_previous %}
+    <a href="?q={{ request.GET.q }}&page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+  {% endif %}
+  <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}
+    <a href="?q={{ request.GET.q }}&page={{ page_obj.next_page_number }}">Next &raquo;</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+function getCookie(n){let v=document.cookie.match('(^|;)\\s*'+n+'=([^;]+)');return v?v.pop():'';}
+$.ajaxSetup({headers:{'X-CSRFToken':getCookie('csrftoken')}});
+$('.btn-delete').click(function(){
+  let url=$(this).data('url'), row='#tax-'+url.split('/').slice(-2)[0];
+  if(confirm('Delete this tax? Bills already printed keep their own tax lines.')){
+    $.post(url, {}, ()=>{showAlert('success','Tax deleted');$(row).remove();});
+  }
+});
+</script>
+{% endblock %}

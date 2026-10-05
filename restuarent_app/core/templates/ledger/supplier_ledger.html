@@ -21,7 +21,7 @@
     <div class="card-body p-2 p-lg-3">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="small text-muted">Opening Balance</div>
-        <div>₨ {{ opening }}</div>
+        <div>{{ CURRENCY_SYMBOL }} {{ opening }}</div>
       </div>
 
       <div class="table-responsive">
@@ -40,11 +40,11 @@
               <tr>
                 <td>{{ e.dt|date:"Y-m-d H:i" }}</td>
                 <td>{{ e.desc }}</td>
-                <td class="text-end">{% if e.dr %}₨ {{ e.dr }}{% endif %}</td>
-                <td class="text-end">{% if e.cr %}₨ {{ e.cr }}{% endif %}</td>
+                <td class="text-end">{% if e.dr %}{{ CURRENCY_SYMBOL }} {{ e.dr }}{% endif %}</td>
+                <td class="text-end">{% if e.cr %}{{ CURRENCY_SYMBOL }} {{ e.cr }}{% endif %}</td>
                 <td class="text-end">
                   <span class="badge badge-balance {% if e.bal > 0 %}red{% else %}green{% endif %}">
-                    ₨ {{ e.bal }}
+                    {{ CURRENCY_SYMBOL }} {{ e.bal }}
                   </span>
                 </td>
               </tr>
@@ -57,7 +57,7 @@
               <th colspan="4" class="text-end">Closing Balance</th>
               <th class="text-end">
                 <span class="badge badge-balance {% if closing > 0 %}red{% else %}green{% endif %}">
-                  ₨ {{ closing }}
+                  {{ CURRENCY_SYMBOL }} {{ closing }}
                 </span>
               </th>
             </tr>

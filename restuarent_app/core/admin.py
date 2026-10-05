@@ -4,7 +4,73 @@ from .models import Unit, RawMaterialUnitConversion
 
 
 from django.contrib import admin
-from .models import POSSettings, PrintStation, TokenSequence, Category, MenuItem
+from .models import (
+    POSSettings, PrintStation, TokenSequence, Category, MenuItem,
+    TaxRate, OrderTax, ModifierGroup, Modifier, OrderItemModifier,
+    RawMaterial,
+)
+
+
+@admin.register(RawMaterial)
+class RawMaterialAdmin(admin.ModelAdmin):
+    list_display = ('name', 'unit', 'current_stock', 'reorder_level', 'supplier', 'stock_badge')
+    list_filter = ('supplier',)
+    search_fields = ('name',)
+    ordering = ('name',)
+
+    @admin.display(description='Status')
+    def stock_badge(self, obj):
+        return {'out': 'OUT OF STOCK', 'low': 'LOW', 'ok': 'OK'}[obj.stock_status]
+
+
+# ---------- Taxes ----------
+@admin.register(TaxRate)
+class TaxRateAdmin(admin.ModelAdmin):
+    """Create as many taxes as you need (VAT, WHT, Service Levy, ...)."""
+    list_display = ('name', 'tax_type', 'rate', 'fixed_amount', 'active', 'is_default', 'is_optional', 'sort_order')
+    list_filter = ('active', 'tax_type', 'is_default', 'is_optional')
+    search_fields = ('name',)
+    ordering = ('sort_order', 'name')
+    fieldsets = (
+        (None, {'fields': ('name', 'tax_type', 'rate', 'fixed_amount')}),
+        ('Behaviour', {'fields': ('active', 'is_default', 'is_optional', 'applies_after_discount', 'sort_order')}),
+    )
+
+
+@admin.register(OrderTax)
+class OrderTaxAdmin(admin.ModelAdmin):
+    list_display = ('order', 'name', 'tax_type', 'rate', 'amount')
+    list_filter = ('tax_type',)
+    search_fields = ('name', 'order__number')
+    readonly_fields = ('created_at',)
+
+
+# ---------- Modifiers ----------
+class ModifierInline(admin.TabularInline):
+    model = Modifier
+    extra = 1
+
+
+@admin.register(ModifierGroup)
+class ModifierGroupAdmin(admin.ModelAdmin):
+    list_display = ('name', 'min_select', 'max_select', 'active', 'sort_order')
+    list_filter = ('active',)
+    search_fields = ('name',)
+    filter_horizontal = ('menu_items',)
+    inlines = [ModifierInline]
+
+
+@admin.register(Modifier)
+class ModifierAdmin(admin.ModelAdmin):
+    list_display = ('name', 'group', 'price', 'active', 'sort_order')
+    list_filter = ('group', 'active')
+    search_fields = ('name', 'group__name')
+
+
+@admin.register(OrderItemModifier)
+class OrderItemModifierAdmin(admin.ModelAdmin):
+    list_display = ('name', 'price', 'order_item')
+    search_fields = ('name', 'order_item__order__number')
 
 @admin.register(POSSettings)
 class POSSettingsAdmin(admin.ModelAdmin):

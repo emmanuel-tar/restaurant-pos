@@ -7,6 +7,7 @@
 {% endblock %}
 
 {% block content %}
+
 <div class="page-header">
   <h1><i class="fa fa-cogs"></i> Raw Materials</h1>
   <a href="{% url 'raw_material_create' %}" class="btn"><i class="fa fa-plus"></i> New Material</a>
@@ -21,11 +22,12 @@
   <thead>
     <tr>
       <th>Name</th>
-      <th>Unit</th>
+      <th>Stock unit</th>
+      <th>Buy unit</th>
       <th>Supplier</th>
-      <th>Stock</th>
-      <th>Reorder Level</th>
-      <th>Avg Unit Price</th>
+      <th class="text-end">Stock</th>
+      <th class="text-end">Reorder</th>
+      <th class="text-end">Avg cost / stock unit</th>
       <th>Actions</th>
     </tr>
   </thead>
@@ -33,13 +35,16 @@
     {% for mat in materials %}
     <tr id="material-{{ mat.pk }}" class="{% if mat.current_stock <= mat.reorder_level %}low-stock{% endif %}">
       <td>{{ mat.name }}</td>
-      <td>{{ mat.unit }}</td>
+      <td>{{ mat.stock_symbol }}</td>
+      <td>{{ mat.purchase_unit.symbol|default:mat.stock_symbol }}{% if mat.pack_size and mat.pack_size != 1 %} × {{ mat.pack_size }}{% endif %}</td>
       <td>{{ mat.supplier.name }}</td>
-      <td>{{ mat.current_stock }}</td>
-      <td>{{ mat.reorder_level }}</td>
-      <td>
-          {% if mat.avg_unit_price %}
-            {{ mat.avg_unit_price }}
+      <td class="text-end">{{ mat.current_stock }}</td>
+      <td class="text-end">{{ mat.reorder_level }}</td>
+      <td class="text-end">
+          {% if mat.avg_cost_per_stock_unit %}
+            {{ CURRENCY_SYMBOL }}{{ mat.avg_cost_per_stock_unit|floatformat:2 }}
+          {% elif mat.avg_unit_price %}
+            {{ CURRENCY_SYMBOL }}{{ mat.avg_unit_price|floatformat:2 }}
           {% else %}
             &mdash;
           {% endif %}
@@ -53,7 +58,7 @@
       </td>
     </tr>
     {% empty %}
-    <tr><td colspan="6">No raw materials found.</td></tr>
+    <tr><td colspan="8">No raw materials found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

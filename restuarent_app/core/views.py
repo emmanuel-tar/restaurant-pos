@@ -6,13 +6,15 @@ from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
 from .models import InventoryTransaction, PrintStatus, PurchaseOrder, RawMaterial, Recipe, RecipeRawMaterial, RecipeSubRecipe
 from django.views.decorators.http import require_POST
+from django.utils.decorators import method_decorator
+from core.permissions import require_permission
 from .models import Unit
 
 from .printing import send_to_printer
 from .utils import recipe_cost_and_weight
 from django.db import transaction
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db.models import Sum, F
 from django.views.generic import TemplateView
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -20,7 +22,9 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from .models import (
     RawMaterialUnitConversion,
     PurchaseOrderItem,
-    MenuItem, Deal
+    MenuItem, Deal,
+    TaxRate, OrderTax, Modifier, ModifierGroup, OrderItemModifier,
+    OrderHold,
 )
 
 from django.urls import reverse_lazy
@@ -35,12 +39,23 @@ from .models import Customer
 
 from django.conf import settings as django_settings
 
+from core.countries import active_country
+
 
 def _brand_name_bytes():
     """App/restaurant name as ESC/POS-safe bytes, taken from settings.RESTAURANT_NAME."""
     name = getattr(django_settings, 'RESTAURANT_NAME', 'RestroPOS')
     # Thermal printers expect ASCII; drop anything they cannot print.
     return name.encode('ascii', 'ignore')
+
+
+def _currency_prefix_bytes():
+    """
+    ASCII-safe currency prefix for receipts, from the active country.
+    Thermal printers usually cannot render symbols such as the Naira sign,
+    so Nigeria prints 'N1,500.00' rather than '\u20a61,500.00'.
+    """
+    return (active_country()['receipt_symbol'] + ' ').encode('ascii', 'ignore')
 
 
 # Mixin to return JSON for AJAX forms
@@ -182,6 +197,7 @@ class AjaxableResponseMixin:
         return super().delete(request, *args, **kwargs)
 
 # --- Categories ---
+@method_decorator(require_permission('menu'), name='dispatch')
 class CategoryListView(LoginRequiredMixin, ListView):
     model = Category
     template_name = 'categories/category_list.html'
@@ -192,23 +208,27 @@ class CategoryListView(LoginRequiredMixin, ListView):
         q = self.request.GET.get('q')
         return qs.filter(name__icontains=q) if q else qs
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class CategoryCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = Category
     fields = ['name', 'description', 'rank',  'show_in_orders', 'default_station']
     template_name = 'categories/category_form.html'
     success_url = reverse_lazy('category_list')
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class CategoryDetailView(LoginRequiredMixin, DetailView):
     model = Category
     template_name = 'categories/category_detail.html'
     context_object_name = 'category'
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class CategoryUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = Category
     fields = ['name', 'description', 'rank',  'show_in_orders', 'default_station']
     template_name = 'categories/category_form.html'
     success_url = reverse_lazy('category_list')
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class CategoryDeleteView(LoginRequiredMixin, DeleteView):
     model = Category
     success_url = reverse_lazy('category_list')
@@ -221,6 +241,7 @@ class CategoryDeleteView(LoginRequiredMixin, DeleteView):
         return super().delete(request, *args, **kwargs)
 
 # --- Menu Items ---
+@method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemListView(LoginRequiredMixin, ListView):
     model = MenuItem
     template_name = 'menu_items/menuitem_list.html'
@@ -231,23 +252,40 @@ class MenuItemListView(LoginRequiredMixin, ListView):
         q = self.request.GET.get('q')
         return qs.filter(name__icontains=q) if q else qs
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = MenuItem
     fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit']
     template_name = 'menu_items/menuitem_form.html'
     success_url = reverse_lazy('menuitem_list')
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemDetailView(LoginRequiredMixin, DetailView):
     model = MenuItem
     template_name = 'menu_items/menuitem_detail.html'
     context_object_name = 'item'
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        from .costing import menu_economics, recipe_breakdown
+        try:
+            ctx['economics'] = menu_economics(self.object)
+        except Exception:
+            ctx['economics'] = {'has_recipe': False}
+        try:
+            ctx['breakdown'] = recipe_breakdown(self.object.recipe)
+        except Exception:
+            ctx['breakdown'] = None
+        return ctx
+
+@method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = MenuItem
     fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit']
     template_name = 'menu_items/menuitem_form.html'
     success_url = reverse_lazy('menuitem_list')
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemDeleteView(LoginRequiredMixin, DeleteView):
     model = MenuItem
     success_url = reverse_lazy('menuitem_list')
@@ -276,6 +314,7 @@ from django.utils.decorators import method_decorator
 
 # ---------- DEALS CRUD ----------
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class DealListView(LoginRequiredMixin, ListView):
     model = Deal
     template_name = 'deals/deal_list.html'
@@ -287,6 +326,7 @@ class DealListView(LoginRequiredMixin, ListView):
         q = self.request.GET.get('q')
         return qs.filter(name__icontains=q) if q else qs
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class DealCreateView(LoginRequiredMixin, CreateView):
     model = Deal
     fields = ['name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image']
@@ -315,6 +355,7 @@ class DealCreateView(LoginRequiredMixin, CreateView):
         return response
 
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class DealUpdateView(LoginRequiredMixin, UpdateView):
     model = Deal
     fields = ['name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image']
@@ -347,12 +388,14 @@ class DealUpdateView(LoginRequiredMixin, UpdateView):
             DealItem.objects.create(deal=self.object, menu_item=mi, quantity=item['quantity'])
         return response
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class DealDetailView(LoginRequiredMixin, DetailView):
     model = Deal
     template_name = 'deals/deal_detail.html'
     context_object_name = 'deal'
 
 
+@method_decorator(require_permission('menu'), name='dispatch')
 class DealDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
     model = Deal
     success_url = reverse_lazy('deal_list')
@@ -370,7 +413,8 @@ from .models import Order
 from django.utils.dateparse import parse_datetime
 
 from decimal import Decimal
-from django.db.models import Sum, F, ExpressionWrapper, DecimalField
+from django.db.models import Sum, F, ExpressionWrapper, DecimalField, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -415,13 +459,50 @@ class OrderListView(LoginRequiredMixin, ListView):
             F('items__quantity') * F('items__unit_price'),
             output_field=DecimalField(max_digits=12, decimal_places=2)
         )
-        qs = qs.annotate(subtotal=Sum(line_total))
+        money = DecimalField(max_digits=12, decimal_places=2)
+
+        # Modifiers are charged per item unit and the tax lines can hold fixed
+        # amounts, so both are pulled in with subqueries (they don't multiply rows).
+        modifiers_per_order = (
+            OrderItemModifier.objects
+            .filter(order_item__order=OuterRef('pk'))
+            .values('order_item__order')
+            .annotate(total=Sum(F('price') * F('order_item__quantity')))
+            .values('total')
+        )
+        taxes_per_order = (
+            OrderTax.objects
+            .filter(order=OuterRef('pk'))
+            .values('order')
+            .annotate(total=Sum('amount'))
+            .values('total')
+        )
+
+        qs = qs.annotate(
+            items_subtotal=Coalesce(Sum(line_total), Value(Decimal('0')), output_field=money),
+            modifiers_total=Coalesce(Subquery(modifiers_per_order, output_field=money),
+                                     Value(Decimal('0')), output_field=money),
+        )
+
+        # The bill treats modifiers as part of the subtotal, so the list does too.
+        qs = qs.annotate(subtotal=F('items_subtotal') + F('modifiers_total'))
+
+        qs = qs.annotate(
+            # Sum() over zero rows is NULL, so orders saved before tax lines
+            # existed keep using the legacy tax_percentage formula.
+            taxes_total=Coalesce(
+                Subquery(taxes_per_order, output_field=money),
+                (F('subtotal') - F('discount')) * F('tax_percentage') / 100,
+                output_field=money,
+            ),
+        )
+
         qs = qs.annotate(
             total_amount=ExpressionWrapper(
                 (F('subtotal') - F('discount'))
-                + (F('subtotal') * F('tax_percentage') / 100)
+                + F('taxes_total')
                 + F('service_charge'),
-                output_field=DecimalField(max_digits=12, decimal_places=2)
+                output_field=money
             )
         )
         return qs
@@ -463,6 +544,8 @@ from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseServerError
 from django.views import View
 from django.utils.timezone import now
+from django.utils.decorators import method_decorator
+from core.permissions import require_permission
 from django.db.models import F, Sum, ExpressionWrapper, DecimalField
 from .models import (
     Category, MenuItem, Deal, Table,
@@ -500,6 +583,104 @@ from .utils import get_next_token_number
 from .printing import send_to_printer
 
 
+
+
+def _tax_and_modifier_payload():
+    """
+    JSON blobs for the order form: the active (optional) taxes and the modifier
+    groups each menu item offers. Shared by the create and update views.
+    """
+    taxes_list = [
+        {
+            "id": t.id,
+            "name": t.name,
+            "rate": float(t.rate),
+            "fixed_amount": float(t.fixed_amount),
+            "tax_type": t.tax_type,
+            "is_default": t.is_default,
+            "is_optional": t.is_optional,
+            "applies_after_discount": t.applies_after_discount,
+        }
+        for t in TaxRate.objects.filter(active=True)
+    ]
+
+    groups = (
+        ModifierGroup.objects
+        .filter(active=True)
+        .prefetch_related('options', 'menu_items')
+    )
+    modifier_map = {}
+    for group in groups:
+        option_ids = set(group.menu_items.values_list('id', flat=True))
+        payload = {
+            "id": group.id,
+            "name": group.name,
+            "min_select": group.min_select,
+            "max_select": group.max_select,
+            "options": [
+                {"id": o.id, "name": o.name, "price": float(o.price)}
+                for o in group.options.filter(active=True)
+            ],
+        }
+        if option_ids:
+            for item_id in option_ids:
+                modifier_map.setdefault(str(item_id), []).append(payload)
+        else:
+            # Empty selection means the group applies to every menu item.
+            modifier_map.setdefault("*", []).append(payload)
+
+    return {"taxes_json": json.dumps(taxes_list), "modifiers_json": json.dumps(modifier_map)}
+
+
+def _attach_modifiers(order_item, modifiers):
+    """
+    Replace the modifiers on a saved order line with the ones the cashier picked.
+
+    Names/prices are snapshotted onto the row, so editing a Modifier later never
+    rewrites a bill that was already printed.
+    """
+    order_item.modifiers.all().delete()
+    for mod in modifiers or []:
+        if isinstance(mod, str):          # tolerate "Large + Cheese" style input
+            parts = [p.strip() for p in mod.split('+') if p.strip()]
+            mod = [{"id": None, "name": p, "price": 0} for p in parts]
+
+        mod_name = (mod.get("name") or "").strip()
+        if not mod_name:
+            continue
+        try:
+            mod_price = Decimal(str(mod.get("price", 0) or 0))
+        except (InvalidOperation, TypeError):
+            mod_price = Decimal('0')
+        OrderItemModifier.objects.create(
+            order_item=order_item,
+            modifier_id=mod.get("id") or None,
+            name=mod_name,
+            price=mod_price,
+        )
+
+
+def _apply_taxes(order, data):
+    """
+    Apply the ticked taxes to an order, replacing whatever was there before.
+
+    tax_ids comes from the tax checkboxes; an empty list means no tax (taxes are
+    fully optional). Legacy orders that never send the key keep their tax lines.
+    """
+    if "tax_ids" not in data:
+        return
+    requested = data.get("tax_ids") or []
+    if not isinstance(requested, list):
+        requested = [requested]
+
+    order.clear_taxes()
+    for tax_id in requested:
+        try:
+            tax = TaxRate.objects.get(id=tax_id)
+        except (TaxRate.DoesNotExist, ValueError, TypeError):
+            continue
+        order.apply_tax(tax)
+    order.refresh_from_db()
 
 
 class OrderCreateView(LoginRequiredMixin, View):
@@ -607,6 +788,7 @@ class OrderCreateView(LoginRequiredMixin, View):
             "tables": tables,
             "waiters_json": waiters_json,
             "all_customers_json": all_customers_json,
+            **_tax_and_modifier_payload(),
         })
     
     def post(self, request):
@@ -731,18 +913,14 @@ class OrderCreateView(LoginRequiredMixin, View):
             )
 
         # === 2. ITEMS BULK CREATION ===
-        total_price = Decimal('0')
         order_items_to_create = []
-        
+
         for it in items_data:
             qty = int(it.get("quantity", 1))
             unit_price = Decimal(str(it.get("unit_price", 0)))
-            
-            line_total = unit_price * qty
-            total_price += line_total
 
             item_type = it.get("type")
-            
+
             order_item = OrderItem(
                 order=order,
                 quantity=qty,
@@ -755,19 +933,35 @@ class OrderCreateView(LoginRequiredMixin, View):
             elif item_type == "deal":
                 order_item.deal_id = it["deal_id"]
             
+            # Keep the modifiers chosen on the frontend so they can be attached below.
+            order_item._pending_modifiers = it.get("modifiers", []) or []
             order_items_to_create.append(order_item)
 
         if order_items_to_create:
             OrderItem.objects.bulk_create(order_items_to_create)
 
+            # bulk_create() bypasses OrderItem.save(), so the stock deduction that
+            # normally happens there never runs. Call it explicitly, otherwise
+            # selling a dish does not reduce its raw materials.
+            for oi in order_items_to_create:
+                oi.update_inventory_usage()
+
+            # --- Attach modifiers (snapshotted name/price) ---
+            for oi in order_items_to_create:
+                _attach_modifiers(oi, getattr(oi, "_pending_modifiers", None))
+
+        # Totals (subtotal incl. modifiers) come from the order model further below.
+
+        # === 2b. TAXES (multiple, optional) ===
+        # tax_ids comes from the tax checkboxes; empty means no tax (fully optional).
+        _apply_taxes(order, data)
+
         # === 3. PAYMENT LOGIC (UPDATED FOR CREDIT) ===
         
-        # Calculate Grand Total for accurate Credit/Ledger math
-        # Formula: (Subtotal - Discount) + Tax + Service
-        after_discount = total_price - discount
-        if after_discount < 0: after_discount = Decimal('0')
-        tax_amount = (after_discount * tax_percentage) / Decimal('100')
-        grand_total = after_discount + tax_amount + service_charge
+        # Calculate Grand Total for accurate Credit/Ledger math.
+        # Uses the order model so multiple taxes AND modifiers are included;
+        # the legacy tax_percentage field only holds percentage taxes.
+        grand_total = order.get_total()
 
         if status_value == 'paid':
             if payment_method == 'credit' and customer_obj:
@@ -927,14 +1121,20 @@ class OrderUpdateView(LoginRequiredMixin, View):
 
         # Existing items for JS
         existing_items = []
-        for oi in order.items.all():
+        for oi in order.items.prefetch_related('modifiers'):
+            item_modifiers = [
+                {"id": m.modifier_id, "name": m.name, "price": float(m.price)}
+                for m in oi.modifiers.all()
+            ]
             if oi.menu_item_id:
                 existing_items.append({
                     "type": "menu",
                     "menu_item_id": oi.menu_item_id,
                     "name": oi.menu_item.name,
                     "quantity": oi.quantity,
-                    "unit_price": float(oi.unit_price)
+                    "unit_price": float(oi.unit_price),
+                    "modifiers": item_modifiers,
+                    "modifiers_total": float(oi.modifiers_total()),
                 })
             else:
                 existing_items.append({
@@ -942,9 +1142,17 @@ class OrderUpdateView(LoginRequiredMixin, View):
                     "deal_id": oi.deal_id,
                     "name": oi.deal.name,
                     "quantity": oi.quantity,
-                    "unit_price": float(oi.unit_price)
+                    "unit_price": float(oi.unit_price),
+                    "modifiers": item_modifiers,
+                    "modifiers_total": float(oi.modifiers_total()),
                 })
         initial_po_items_json = json.dumps(existing_items)
+
+        # Taxes already applied to this order, so the checkboxes come up ticked
+        # instead of resetting to the catalogue defaults.
+        order_tax_ids_json = json.dumps(
+            [tl.tax_rate_id for tl in order.tax_lines.all() if tl.tax_rate_id]
+        )
 
         # Annotate tables
         tables = list(Table.objects.all().order_by("number"))
@@ -976,6 +1184,8 @@ class OrderUpdateView(LoginRequiredMixin, View):
             "tables":              tables,
             "waiters_json": waiters_json,
             "all_customers_json": all_customers_json,
+            "order_tax_ids_json": order_tax_ids_json,
+            **_tax_and_modifier_payload(),
         })
 
 
@@ -1039,28 +1249,43 @@ class OrderUpdateView(LoginRequiredMixin, View):
 
             if key in existing_map:
                 oi = existing_map.pop(key)
-                oi.quantity    = it["quantity"]
-                oi.unit_price = Decimal(str(it["unit_price"]))
-                oi.save() 
+                if int(oi.quantity or 0) != int(it["quantity"] or 0):
+                    # Quantity changed: return old deduction, apply the new one.
+                    oi.reverse_inventory_usage()
+                    oi.quantity    = it["quantity"]
+                    oi.unit_price = Decimal(str(it["unit_price"]))
+                    oi.save()
+                else:
+                    oi.unit_price = Decimal(str(it["unit_price"]))
+                    oi.save(update_fields=['unit_price'])
+                # Modifiers belong to the line, so they follow it through an edit.
+                _attach_modifiers(oi, it.get("modifiers"))
             else:
-                OrderItem.objects.create(
+                new_oi = OrderItem.objects.create(
                     order=order, menu_item_id=m_id, deal_id=d_id,
                     quantity=it["quantity"], unit_price=Decimal(str(it["unit_price"]))
                 )
+                _attach_modifiers(new_oi, it.get("modifiers"))
 
         for oi in existing_map.values():
+            # Removed line: return its stock before deleting. reverse_inventory_usage()
+            # deletes the 'out' rows individually because QuerySet.delete() would skip
+            # the stock-restoring delete() override. The old "dangling rows" cleanup
+            # that followed was also deleting unrelated rows: `oi.pk` is already None
+            # after oi.delete(), so it filtered on order_item IS NULL.
+            oi.reverse_inventory_usage()
             oi.delete()
+
+        # 3b) Taxes (multiple, optional) - same handling as the create view
+        _apply_taxes(order, data)
 
         # 4) If marking paid, Handle Payment & Printing
         if order.status == "paid":
-            
-            # --- Recalculate Totals (Items might have changed) ---
-            from decimal import Decimal
-            subtotal = sum(item.quantity * item.unit_price for item in order.items.all())
-            after_disc = subtotal - order.discount
-            if after_disc < 0: after_disc = Decimal('0')
-            tax_amt = (after_disc * order.tax_percentage) / Decimal('100')
-            grand_total = after_disc + tax_amt + order.service_charge
+
+            # --- Recalculate Totals (Items, modifiers and taxes may have changed) ---
+            # Percent taxes depend on the discounted subtotal, so refresh them first.
+            order.recalculate_taxes()
+            grand_total = order.get_total()
 
             # --- Handle Credit / Payment Logic ---
             if payment_method == 'credit' and customer_obj:
@@ -1139,36 +1364,127 @@ class OrderDetailView(LoginRequiredMixin, DetailView):
         ctx = super().get_context_data(**kwargs)
         order = self.object
 
-        # 1) Compute subtotal as a Decimal
-        subtotal = sum(
-            oi.quantity * oi.unit_price
-            for oi in order.items.all()
-        ) or Decimal('0')
+        # Prefetch so the items, their modifiers and the tax lines cost 3 queries,
+        # not one per line.
+        order = (
+            Order.objects
+            .prefetch_related('items__modifiers', 'tax_lines')
+            .get(pk=order.pk)
+        )
+        ctx['order'] = order
 
-        # 2) Pull discounts, tax%, service as Decimals
-        discount       = order.discount       or Decimal('0')
-        tax_percentage = order.tax_percentage or Decimal('0')
-        service_charge = order.service_charge or Decimal('0')
-
-        # 3) Compute tax on (subtotal – discount)
-        tax_amount = (subtotal - discount) * tax_percentage / Decimal('100')
-
-        # 4) Grand total
-        grand_total = subtotal - discount + tax_amount + service_charge
-
+        # Totals come from the model so modifiers and every applied tax
+        # (percentage, fixed, optional) are counted exactly once.
         ctx.update({
-            'subtotal':   subtotal,
-            'tax_amount': tax_amount,
-            'grand_total': grand_total,
+            'subtotal':      order.get_subtotal(),
+            'tax_lines':     order.tax_display_lines(),
+            'tax_amount':    order.get_tax_total(),
+            'grand_total':   order.get_total(),
         })
         return ctx
 
 
 
+@method_decorator(require_permission('accounts'), name='dispatch')
 class OrderDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
     model = Order
     success_url = reverse_lazy('order_list')
 
+    def form_valid(self, form):
+        # Voiding an order returns its deducted raw materials to stock.
+        for oi in self.object.items.all():
+            try:
+                oi.reverse_inventory_usage()
+            except Exception:
+                pass
+        return super().form_valid(form)
+
+# ---------- Order holds (park / recall) ----------
+# A held bill is a snapshot in OrderHold, never a real Order, so parking a bill
+# does not consume stock, use a token number or affect the day's sales.
+def _hold_payload(hold):
+    return {
+        'id': hold.id,
+        'label': hold.label,
+        'table_id': hold.table_id,
+        'table_number': hold.table.number if hold.table_id else None,
+        'items': hold.items or [],
+        'discount': str(hold.discount),
+        'service_charge': str(hold.service_charge),
+        'tax_ids': hold.tax_ids or [],
+        'item_count': hold.item_count,
+        'total': str(hold.total),
+        'created_at': timezone.localtime(hold.created_at).strftime('%H:%M'),
+        'is_active': hold.is_active,
+    }
+
+
+@method_decorator(require_permission('sales'), name='dispatch')
+class OrderHoldView(LoginRequiredMixin, View):
+    """GET: list parked bills.  POST: park the cart that is currently on screen."""
+
+    def get(self, request):
+        holds = (
+            OrderHold.objects
+            .filter(is_active=True)
+            .select_related('table')
+            .order_by('-created_at')[:50]
+        )
+        return JsonResponse({'holds': [_hold_payload(h) for h in holds]})
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest('Invalid JSON')
+
+        items = data.get('items') or []
+        if not items:
+            return JsonResponse({'error': 'There is nothing to hold.'}, status=400)
+
+        label = (data.get('label') or '').strip()
+        if not label:
+            label = 'Hold %s' % timezone.localtime().strftime('%H:%M')
+
+        table_id = data.get('table_id') or None
+        if table_id and not Table.objects.filter(pk=table_id).exists():
+            table_id = None
+
+        hold = OrderHold.objects.create(
+            label=label[:80],
+            table_id=table_id,
+            items=items,
+            discount=Decimal(str(data.get('discount', 0) or 0)),
+            service_charge=Decimal(str(data.get('service_charge', 0) or 0)),
+            tax_ids=data.get('tax_ids') or [],
+            created_by=request.user,
+        )
+        return JsonResponse({'message': 'Bill parked', 'hold': _hold_payload(hold)})
+
+
+@method_decorator(require_permission('sales'), name='dispatch')
+class OrderHoldRecallView(LoginRequiredMixin, View):
+    """POST: hand the parked bill back to the order screen."""
+
+    def post(self, request, pk):
+        hold = get_object_or_404(OrderHold, pk=pk)
+
+        # Recalling twice is harmless: only the first recall is stamped.
+        if hold.recalled_at is None:
+            hold.recalled_at = timezone.now()
+            hold.save(update_fields=['recalled_at'])
+
+        return JsonResponse({'message': 'Bill recalled', 'hold': _hold_payload(hold)})
+
+
+@method_decorator(require_permission('sales'), name='dispatch')
+class OrderHoldDeleteView(LoginRequiredMixin, View):
+    """POST: throw a parked bill away."""
+
+    def post(self, request, pk):
+        hold = get_object_or_404(OrderHold, pk=pk)
+        hold.delete()
+        return JsonResponse({'message': 'Held bill removed'})
 
 
 from decimal import Decimal
@@ -1314,19 +1630,21 @@ def build_bill_bytes(order, is_food_panda = "walk_in", copy = ""):
     lines.append(b"-" * 40 + b"\n")
 
     # ─── Each OrderItem row ───────────────────────────────────────────────
+    # unit price shown = item price + its modifiers, so the printed arithmetic
+    # (unit x qty = total) always adds up.
     subtotal = 0.0
-    
-    for oi in order.items.all():
+
+    for oi in order.items.select_related('menu_item', 'deal').prefetch_related('modifiers'):
         name = (oi.menu_item.name if oi.menu_item else oi.deal.name)[:16]
         name_field = name.ljust(16).encode("ascii", "ignore")
 
         qty = oi.quantity
         qty_field = str(qty).rjust(3).encode("ascii")
 
-        unit_price_f = float(oi.unit_price)
+        unit_price_f = float(oi.effective_unit_price())
         price_field = f"{unit_price_f:.2f}".rjust(7).encode("ascii")
 
-        line_total_f = float(oi.quantity * oi.unit_price)
+        line_total_f = float(oi.line_total())
         total_field = f"{line_total_f:.2f}".rjust(7).encode("ascii")
 
         subtotal += line_total_f
@@ -1334,22 +1652,38 @@ def build_bill_bytes(order, is_food_panda = "walk_in", copy = ""):
         # e.g. b"Fish & Chips   2   150.00 300.00\n"
         lines.append(name_field + b" " + qty_field + b" " + price_field + b" " + total_field + b"\n")
 
+        # Modifiers chosen for this line, indented under the item they belong to.
+        for mod in oi.modifiers.all():
+            mod_name = ("+ " + mod.name)[:16].encode("ascii", "ignore")
+            mod_price = f"{float(mod.price or 0):.2f}".rjust(7).encode("ascii")
+            lines.append(mod_name.ljust(16) + b"   " + mod_price + b" " * 8 + b"\n")
+
     lines.append(b"-" * 40 + b"\n\n")
 
     # ─── Totals section ───────────────────────────────────────────────────
-    discount_f = float(order.discount)
-    tax_perc_f = float(order.tax_percentage)
-    service_f = float(order.service_charge)
-    after_disc = subtotal - discount_f
-    tax_amt_f = after_disc * (tax_perc_f / 100.0)
-    grand_f = after_disc + tax_amt_f + service_f
+    discount_f = float(order.discount or 0)
+    service_f = float(order.service_charge or 0)
 
-    lines.append(b"Subtotal : " + f"{subtotal:.2f}".encode("ascii") + b"\n")
-    lines.append(b"Discount : " + f"{discount_f:.2f}".encode("ascii") + b"\n")
-    lines.append(b"Tax (" + f"{tax_perc_f:.0f}".encode("ascii") + b"%) : " + f"{tax_amt_f:.2f}".encode("ascii") + b"\n")
-    lines.append(b"Service : " + f"{service_f:.2f}".encode("ascii") + b"\n")
+    currency = _currency_prefix_bytes()
+
+    lines.append(b"Subtotal : " + currency + f"{subtotal:.2f}".encode("ascii") + b"\n")
+    lines.append(b"Discount : " + currency + f"{discount_f:.2f}".encode("ascii") + b"\n")
+
+    # One line per tax (VAT, WHT, Service Levy, ...); old orders that predate
+    # tax lines still print their single legacy tax.
+    for tax_line in order.tax_display_lines():
+        if tax_line.tax_type == 'fixed':
+            tax_label = f"{tax_line.name} (fixed)"
+        else:
+            tax_label = f"{tax_line.name} ({float(tax_line.rate or 0):g}%)"
+        lines.append(
+            tax_label.encode("ascii", "ignore") + b" : "
+            + currency + f"{float(tax_line.amount):.2f}".encode("ascii") + b"\n"
+        )
+
+    lines.append(b"Service : " + currency + f"{service_f:.2f}".encode("ascii") + b"\n")
     lines.append(esc + b"\x21" + b"\x20")   # ESC ! 0x20 → double‐width
-    lines.append(b"Grand Total: " + f"{grand_f:.2f}".encode("ascii") + b"\n\n")
+    lines.append(b"Grand Total: " + currency + f"{float(order.get_total()):.2f}".encode("ascii") + b"\n\n")
     lines.append(esc + b"\x45" + b"\x00")   # bold off
 
     # ─── Footer / Branding (professional signature) ───────────────────────
@@ -1599,6 +1933,7 @@ from django.views.generic import ListView, CreateView, UpdateView
 from .models import Table
 from .forms import TableForm
 
+@method_decorator(require_permission('sales'), name='dispatch')
 class TableListView(ListView):
     model = Table
     template_name = 'tables/table_list.html'
@@ -1764,6 +2099,7 @@ from .views import AjaxableResponseMixin  # reuse your existing mixin
 from django.contrib.auth.mixins import LoginRequiredMixin
 
 # --- Suppliers CRUD ---
+@method_decorator(require_permission('inventory'), name='dispatch')
 class SupplierListView(LoginRequiredMixin, ListView):
     model = Supplier
     template_name = 'suppliers/supplier_list.html'
@@ -1775,23 +2111,27 @@ class SupplierListView(LoginRequiredMixin, ListView):
         q = self.request.GET.get('q')
         return qs.filter(name__icontains=q) if q else qs
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class SupplierCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = Supplier
     fields = ['name','contact_number','email','address']
     template_name = 'suppliers/supplier_form.html'
     success_url = reverse_lazy('supplier_list')
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class SupplierDetailView(LoginRequiredMixin, DetailView):
     model = Supplier
     template_name = 'suppliers/supplier_detail.html'
     context_object_name = 'supplier'
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class SupplierUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = Supplier
     fields = ['name','contact_number','email','address']
     template_name = 'suppliers/supplier_form.html'
     success_url = reverse_lazy('supplier_list')
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class SupplierDeleteView(LoginRequiredMixin, DeleteView):
     model = Supplier
     success_url = reverse_lazy('supplier_list')
@@ -1814,7 +2154,73 @@ from .views import AjaxableResponseMixin  # your existing mixin
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Q
 
 
+class UnitListView(LoginRequiredMixin, TemplateView):
+    """Read-only Unit master (seeded standard restaurant units)."""
+    template_name = 'inventory/unit_list.html'
+
+    def get_context_data(self, **kwargs):
+        from .models import Unit
+        ctx = super().get_context_data(**kwargs)
+        units = list(Unit.objects.all().order_by('unit_type', 'name'))
+        for u in units:
+            try:
+                u.base_factor = Unit.to_base_factor(u.symbol)
+            except Exception:
+                u.base_factor = 1
+        ctx['units'] = units
+        return ctx
+
+
 # --- Raw Materials CRUD ---
+class LowStockView(LoginRequiredMixin, TemplateView):
+    """
+    Everything that needs reordering, with a suggested order quantity and the
+    estimated cost, so a purchase order can be raised quickly.
+    """
+    template_name = 'inventory/low_stock.html'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+
+        tracked = (
+            RawMaterial.objects
+            .filter(reorder_level__gt=0)
+            .select_related('supplier')
+            .order_by('supplier__name', 'name')
+        )
+
+        low, out = [], []
+        for m in tracked:
+            if m.is_out_of_stock:
+                out.append(m)
+            elif m.is_low_stock:
+                low.append(m)
+
+        # Items with no reorder level set yet - opt-in candidates.
+        untracked = (
+            RawMaterial.objects
+            .filter(reorder_level__lte=0)
+            .select_related('supplier')
+            .order_by('name')
+        )
+
+        def total_cost(rows):
+            return sum((m.estimated_cost for m in rows), Decimal('0'))
+
+        ctx.update({
+            'low_items': low,
+            'out_items': out,
+            'untracked_items': untracked,
+            'low_count': len(low),
+            'out_count': len(out),
+            'total_estimated_cost': total_cost(low + out),
+            'suppliers': sorted({m.supplier for m in (low + out) if m.supplier_id},
+                                key=lambda s: s.name.lower()),
+        })
+        return ctx
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RawMaterialListView(LoginRequiredMixin, ListView):
     model = RawMaterial
     template_name = 'raw_materials/rawmaterial_list.html'
@@ -1845,23 +2251,42 @@ class RawMaterialListView(LoginRequiredMixin, ListView):
         )
         return qs
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RawMaterialCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = RawMaterial
-    fields = ['name', 'unit', 'supplier', 'current_stock', 'reorder_level']
+    fields = ['name', 'stock_unit', 'purchase_unit', 'pack_size', 'supplier', 'current_stock', 'reorder_level']
     template_name = 'raw_materials/rawmaterial_form.html'
     success_url = reverse_lazy('raw_material_list')
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RawMaterialDetailView(LoginRequiredMixin, DetailView):
     model = RawMaterial
     template_name = 'raw_materials/rawmaterial_detail.html'
     context_object_name = 'material'
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        m = self.object
+        ctx['avg_cost'] = m.avg_cost_per_stock_unit
+        ctx['latest_cost'] = m.latest_cost_per_stock_unit
+        # Recipes this material is used in (RecipeRawMaterial has no related_name,
+        # so query the model explicitly and select_related to avoid N+1 queries).
+        ctx['used_in'] = (
+            RecipeRawMaterial.objects
+            .filter(raw_material=m)
+            .select_related('recipe__menu_item', 'unit')
+            .order_by('recipe__menu_item__name')[:50]
+        )
+        return ctx
+
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RawMaterialUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = RawMaterial
-    fields = ['name', 'unit', 'supplier', 'current_stock', 'reorder_level']
+    fields = ['name', 'stock_unit', 'purchase_unit', 'pack_size', 'supplier', 'current_stock', 'reorder_level']
     template_name = 'raw_materials/rawmaterial_form.html'
     success_url = reverse_lazy('raw_material_list')
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RawMaterialDeleteView(LoginRequiredMixin, DeleteView):
     model = RawMaterial
     success_url = reverse_lazy('raw_material_list')
@@ -1872,6 +2297,151 @@ class RawMaterialDeleteView(LoginRequiredMixin, DeleteView):
         if request.is_ajax():
             return JsonResponse({'message': 'Deleted'})
         return super().delete(request, *args, **kwargs)
+
+
+# ---------- Taxes CRUD ----------
+# Cashiers pick these on the order screen, so they are managed in the app
+# instead of only through Django admin.
+from .forms import TaxRateForm, ModifierGroupForm, ModifierOptionFormSet
+from django.http import HttpResponseRedirect
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class TaxRateListView(LoginRequiredMixin, ListView):
+    model = TaxRate
+    template_name = 'taxes/taxrate_list.html'
+    context_object_name = 'taxes'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = super().get_queryset().order_by('sort_order', 'name')
+        q = self.request.GET.get('q')
+        if q:
+            qs = qs.filter(name__icontains=q)
+        return qs
+
+
+class _SingleDefaultTaxMixin:
+    """Only one tax may be the pre-ticked default on a new order."""
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.object.is_default:
+            TaxRate.objects.exclude(pk=self.object.pk).update(is_default=False)
+        return response
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class TaxRateCreateView(LoginRequiredMixin, _SingleDefaultTaxMixin, CreateView):
+    model = TaxRate
+    form_class = TaxRateForm
+    template_name = 'taxes/taxrate_form.html'
+    success_url = reverse_lazy('taxrate_list')
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class TaxRateUpdateView(LoginRequiredMixin, _SingleDefaultTaxMixin, UpdateView):
+    model = TaxRate
+    form_class = TaxRateForm
+    template_name = 'taxes/taxrate_form.html'
+    success_url = reverse_lazy('taxrate_list')
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class TaxRateDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
+    model = TaxRate
+    success_url = reverse_lazy('taxrate_list')
+
+
+# ---------- Modifier groups CRUD ----------
+@method_decorator(require_permission('menu'), name='dispatch')
+class ModifierGroupListView(LoginRequiredMixin, ListView):
+    model = ModifierGroup
+    template_name = 'modifiers/modifiergroup_list.html'
+    context_object_name = 'groups'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .prefetch_related('options', 'menu_items')
+            .order_by('sort_order', 'name')
+        )
+        q = self.request.GET.get('q')
+        if q:
+            qs = qs.filter(name__icontains=q)
+        return qs
+
+
+class _InvalidOptions(Exception):
+    """Internal signal: the inline options failed validation."""
+
+    def __init__(self, formset):
+        super().__init__('Invalid modifier options')
+        self.formset = formset
+
+
+class _ModifierGroupFormMixin:
+    """Shared parent-form + inline-options handling for create and update."""
+
+    def _build_option_formset(self):
+        return ModifierOptionFormSet(
+            self.request.POST, prefix='options', instance=self.object
+        )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        if self.request.method == 'POST':
+            ctx['option_formset'] = self._build_option_formset()
+        else:
+            ctx['option_formset'] = ModifierOptionFormSet(
+                instance=self.object, prefix='options'
+            )
+        return ctx
+
+    def form_valid(self, form):
+        try:
+            # The group and its options must land together or not at all,
+            # otherwise a bad option list would leave a half-made group behind.
+            with transaction.atomic():
+                self.object = form.save()
+                formset = self._build_option_formset()
+                if not formset.is_valid():
+                    raise _InvalidOptions(formset)
+                formset.save()
+        except _InvalidOptions as invalid:
+            self.object = None
+            return self.form_invalid(form, invalid.formset)
+
+        return HttpResponseRedirect(self.get_success_url())
+
+    def form_invalid(self, form, formset=None):
+        ctx = self.get_context_data(form=form)
+        if formset is not None:
+            ctx['option_formset'] = formset
+        return self.render_to_response(ctx, status=400)
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class ModifierGroupCreateView(LoginRequiredMixin, _ModifierGroupFormMixin, CreateView):
+    model = ModifierGroup
+    form_class = ModifierGroupForm
+    template_name = 'modifiers/modifiergroup_form.html'
+    success_url = reverse_lazy('modifiergroup_list')
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class ModifierGroupUpdateView(LoginRequiredMixin, _ModifierGroupFormMixin, UpdateView):
+    model = ModifierGroup
+    form_class = ModifierGroupForm
+    template_name = 'modifiers/modifiergroup_form.html'
+    success_url = reverse_lazy('modifiergroup_list')
+
+
+@method_decorator(require_permission('menu'), name='dispatch')
+class ModifierGroupDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
+    model = ModifierGroup
+    success_url = reverse_lazy('modifiergroup_list')
 
 
 # Purchase Orders
@@ -1913,6 +2483,7 @@ def supplier_balance_json(request):
     return JsonResponse({'previous_due': float(prev_due)})
 
 # ----- List -----
+@method_decorator(require_permission('inventory'), name='dispatch')
 class PurchaseOrderListView(LoginRequiredMixin, ListView):
     model = PurchaseOrder
     template_name = 'purchase_orders/purchaseorder_list.html'
@@ -1927,6 +2498,7 @@ class PurchaseOrderListView(LoginRequiredMixin, ListView):
         return qs
 
 # ----- Create -----
+@method_decorator(require_permission('inventory'), name='dispatch')
 class PurchaseOrderCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = PurchaseOrder
     fields = ['supplier']  # keep simple; we set tax/discount etc. from POST
@@ -1935,8 +2507,15 @@ class PurchaseOrderCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateV
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        rms = RawMaterial.objects.select_related('supplier').order_by('name')
-        ctx['raw_materials_json'] = json.dumps([{'pk': rm.pk, 'name': rm.name, 'unit': rm.unit} for rm in rms])
+        rms = RawMaterial.objects.select_related('supplier', 'stock_unit', 'purchase_unit').order_by('name')
+        ctx['raw_materials_json'] = json.dumps([{
+            'pk': rm.pk, 'name': rm.name, 'unit': rm.stock_symbol,
+            'stock_unit': rm.stock_symbol, 'stock_unit_id': rm.stock_unit_id,
+            'purchase_unit': getattr(rm.purchase_unit, 'symbol', None) or rm.stock_symbol,
+            'purchase_unit_id': rm.purchase_unit_id or rm.stock_unit_id,
+            'pack_size': float(rm.pack_size or 1),
+            'avg_cost': float(rm.avg_cost_per_stock_unit or 0),
+        } for rm in rms])
         ctx['initial_po_items_json'] = json.dumps([])
         ctx['bank_accounts'] = BankAccount.objects.all()
         return ctx
@@ -1959,7 +2538,8 @@ class PurchaseOrderCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateV
                 purchase_order=self.object,
                 raw_material_id=int(it['raw_material_id']),
                 quantity=qty,
-                unit_price=up
+                unit_price=up,
+                purchase_unit_id=it.get('purchase_unit_id') or None
             )
             subtotal += (qty * up)
 
@@ -2003,6 +2583,7 @@ from .views import AjaxableResponseMixin  # keep your existing mixin
 from .models import RawMaterial, PurchaseOrder, PurchaseOrderItem, Expense
 
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class PurchaseOrderUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = PurchaseOrder
     # keep your original editable fields list (don’t add/remove form fields here)
@@ -2040,18 +2621,23 @@ class PurchaseOrderUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateV
         ctx = super().get_context_data(**kwargs)
 
         # Materials for the line-items table
-        rms = RawMaterial.objects.select_related('supplier').order_by('name')
-        ctx['raw_materials_json'] = json.dumps([
-            {'pk': rm.pk, 'name': rm.name, 'unit': rm.unit}
-            for rm in rms
-        ])
+        rms = RawMaterial.objects.select_related('supplier', 'stock_unit', 'purchase_unit').order_by('name')
+        ctx['raw_materials_json'] = json.dumps([{
+            'pk': rm.pk, 'name': rm.name, 'unit': rm.stock_symbol,
+            'stock_unit': rm.stock_symbol, 'stock_unit_id': rm.stock_unit_id,
+            'purchase_unit': getattr(rm.purchase_unit, 'symbol', None) or rm.stock_symbol,
+            'purchase_unit_id': rm.purchase_unit_id or rm.stock_unit_id,
+            'pack_size': float(rm.pack_size or 1),
+            'avg_cost': float(rm.avg_cost_per_stock_unit or 0),
+        } for rm in rms])
 
         # Existing lines for this PO
         existing_items = [
             {
                 'raw_material_id': pi.raw_material_id,
                 'quantity': float(pi.quantity),
-                'unit_price': float(pi.unit_price)
+                'unit_price': float(pi.unit_price),
+                'purchase_unit_id': pi.purchase_unit_id,
             }
             for pi in self.object.items.all()
         ]
@@ -2085,8 +2671,13 @@ class PurchaseOrderUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateV
           - Recalculate subtotal (total_cost) on the server
         We do NOT mix in previous_due here (net_total remains pure item/tax/discount math).
         """
-        # wipe old items before saving so we re-build cleanly
-        PurchaseOrderItem.objects.filter(purchase_order=self.object).delete()
+        # Wipe old lines and rebuild them from the posted JSON. Delete them one at
+        # a time: QuerySet.delete() does a bulk delete that bypasses
+        # PurchaseOrderItem.delete(), and that override is what writes the 'return'
+        # reversal putting the stock back. Bulk-deleting here silently lost the
+        # returned stock and then re-added the new quantities, inflating levels.
+        for old_item in list(self.object.items.all()):
+            old_item.delete()
 
         response = super().form_valid(form)
 
@@ -2099,7 +2690,8 @@ class PurchaseOrderUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateV
                 purchase_order=self.object,
                 raw_material_id=it['raw_material_id'],
                 quantity=qty,
-                unit_price=up
+                unit_price=up,
+                purchase_unit_id=it.get('purchase_unit_id') or None
             )
             total += qty * up
 
@@ -2133,6 +2725,7 @@ from django.views.generic import DetailView
 from .models import PurchaseOrder, InventoryTransaction, Expense
 
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class PurchaseOrderDetailView(LoginRequiredMixin, DetailView):
     model = PurchaseOrder
     template_name = 'purchase_orders/purchaseorder_detail.html'
@@ -2174,6 +2767,7 @@ class PurchaseOrderDetailView(LoginRequiredMixin, DetailView):
         return ctx
 
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class PurchaseOrderDeleteView(LoginRequiredMixin, DeleteView):
     model = PurchaseOrder
     success_url = reverse_lazy('purchase_order_list')
@@ -2208,21 +2802,26 @@ class CostReportView(LoginRequiredMixin, TemplateView):
         ctx = super().get_context_data(**kwargs)
         today = date.today()
 
-        # reuse compute_recipe_cost for menu items
-        # now uses the new weight-aware logic
+        # Standard costing: per-portion estimate incl. yield/wastage.
+        from .costing import recipe_cost, menu_economics
         item_rows = []
         for mi in MenuItem.objects.prefetch_related(
                  'recipe__raw_ingredients', 'recipe__subrecipes__sub_recipe'):
-            if hasattr(mi, 'recipe'):
-                 cost = compute_recipe_cost(mi.recipe)
-            else:
-                 cost = Decimal('0')
+            try:
+                econ = menu_economics(mi)
+                cost = econ['estimated_cost'] if econ['has_recipe'] else Decimal('0')
+            except Exception:
+                econ, cost = {'has_recipe': False}, Decimal('0')
             sold = OrderItem.objects.filter(menu_item=mi,
                                             order__created_at__date=today)\
                                      .aggregate(q=Sum('quantity'))['q'] or 0
             item_rows.append({
                 'name': mi.name,
+                'price': mi.price,
                 'avg_cost_price': cost,
+                'food_cost_percent': (econ.get('food_cost_percent') if isinstance(econ, dict) else None),
+                'margin_amount': (econ.get('margin_amount') if isinstance(econ, dict) else None),
+                'has_recipe': bool(isinstance(econ, dict) and econ.get('has_recipe')),
                 'sold_qty_today': sold,
                 'total_cost_today': cost * sold,
             })
@@ -2250,6 +2849,7 @@ class CostReportView(LoginRequiredMixin, TemplateView):
 
 
 # --- List & Detail ---
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RecipeListView(LoginRequiredMixin, ListView):
     model = Recipe
     template_name = 'recipes/recipe_list.html'
@@ -2261,32 +2861,52 @@ class RecipeListView(LoginRequiredMixin, ListView):
         q = self.request.GET.get('q')
         return qs.filter(menu_item__name__icontains=q) if q else qs
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RecipeDetailView(LoginRequiredMixin, DetailView):
     model = Recipe
     template_name = 'recipes/recipe_detail.html'
     context_object_name = 'recipe'
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        from .costing import recipe_breakdown, menu_economics
+        try:
+            ctx['breakdown'] = recipe_breakdown(self.object)
+        except Exception as e:
+            ctx['breakdown'] = {'lines': [], 'sub_recipe_lines': [], 'gross_cost': 0,
+                                'cost_per_portion': 0, 'error': str(e)}
+        try:
+            ctx['economics'] = menu_economics(self.object.menu_item)
+        except Exception:
+            ctx['economics'] = {}
+        return ctx
+
 
 # --- Create & Update ---
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RecipeCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = Recipe
-    fields = ['menu_item', 'name']
+    fields = ['menu_item', 'name', 'yield_qty', 'wastage_percent', 'instructions']
     template_name = 'recipes/recipe_form.html'
     success_url = reverse_lazy('recipe_list')
 
     def get_context_data(self, **ctx):
         data = super().get_context_data(**ctx)
         # raw materials
-        rms = RawMaterial.objects.order_by('name')
+        rms = RawMaterial.objects.select_related('stock_unit', 'purchase_unit').order_by('name')
         data['raw_materials_json'] = json.dumps([
-            {'pk': rm.pk, 'name': rm.name, 'unit': rm.unit}
+            {'pk': rm.pk, 'name': rm.name, 'unit': rm.stock_symbol,
+             'stock_unit_id': rm.stock_unit_id,
+             'stock_unit': rm.stock_symbol,
+             'stock_type': getattr(rm.stock_unit, 'unit_type', ''),
+             'avg_cost': float(rm.avg_cost_per_stock_unit or 0)}
             for rm in rms
         ])
         # units
         from .models import Unit
-        units = Unit.objects.all()
+        units = Unit.objects.all().order_by('unit_type', 'name')
         data['units_json'] = json.dumps([
-            {'pk': u.pk, 'symbol': u.symbol} for u in units
+            {'pk': u.pk, 'symbol': u.symbol, 'name': u.name, 'type': u.unit_type} for u in units
         ])
         # existing recipes for nesting
         recs = Recipe.objects.all()
@@ -2319,20 +2939,22 @@ class RecipeCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
                 recipe=recipe,
                 sub_recipe_id=it['sub_recipe_id'],
                 quantity=Decimal(str(it['quantity'])),
-                unit_id=it['unit_id']
+                unit_id=it.get('unit_id') or None
             )
 
-        # update menu_item.cost_price
-        cost = compute_recipe_cost(recipe)
-        mi = recipe.menu_item
-        mi.cost_price = cost
-        mi.save(update_fields=['cost_price'])
+        # update menu_item.cost_price (per-portion estimate incl. yield/wastage)
+        from .costing import refresh_cost
+        try:
+            refresh_cost(recipe.menu_item)
+        except Exception:
+            pass
 
         return resp
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RecipeUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = Recipe
-    fields = ['menu_item', 'name']
+    fields = ['menu_item', 'name', 'yield_qty', 'wastage_percent', 'instructions']
     template_name = 'recipes/recipe_form.html'
     success_url = reverse_lazy('recipe_list')
 
@@ -2340,16 +2962,20 @@ class RecipeUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
         data = super().get_context_data(**kwargs)
 
         # 1) All raw materials
-        rms = RawMaterial.objects.order_by('name')
+        rms = RawMaterial.objects.select_related('stock_unit', 'purchase_unit').order_by('name')
         data['raw_materials_json'] = json.dumps([
-            {'pk': rm.pk, 'name': rm.name, 'unit': rm.unit}
+            {'pk': rm.pk, 'name': rm.name, 'unit': rm.stock_symbol,
+             'stock_unit_id': rm.stock_unit_id,
+             'stock_unit': rm.stock_symbol,
+             'stock_type': getattr(rm.stock_unit, 'unit_type', ''),
+             'avg_cost': float(rm.avg_cost_per_stock_unit or 0)}
             for rm in rms
         ])
 
         # 2) All units
-        units = Unit.objects.all()
+        units = Unit.objects.all().order_by('unit_type', 'name')
         data['units_json'] = json.dumps([
-            {'pk': u.pk, 'symbol': u.symbol}
+            {'pk': u.pk, 'symbol': u.symbol, 'name': u.name, 'type': u.unit_type}
             for u in units
         ])
 
@@ -2408,17 +3034,19 @@ class RecipeUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
                 recipe=recipe,
                 sub_recipe_id=it['sub_recipe_id'],
                 quantity=Decimal(str(it['quantity'])),
-                unit_id=it['unit_id']
+                unit_id=it.get('unit_id') or None
             )
 
         # 4) Recompute & store the MenuItem's cost_price
-        cost = compute_recipe_cost(recipe)
-        mi = recipe.menu_item
-        mi.cost_price = cost
-        mi.save(update_fields=['cost_price'])
+        from .costing import refresh_cost
+        try:
+            refresh_cost(recipe.menu_item)
+        except Exception:
+            pass
 
         return response
 
+@method_decorator(require_permission('inventory'), name='dispatch')
 class RecipeDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
     model = Recipe
     success_url = reverse_lazy('recipe_list')
@@ -2435,6 +3063,7 @@ from .views import AjaxableResponseMixin  # your existing mixin
 
 # — Waiters CRUD —
 
+@method_decorator(require_permission('staff'), name='dispatch')
 class WaiterListView(LoginRequiredMixin, ListView):
     model = Waiter
     template_name = 'waiters/waiter_list.html'
@@ -2447,6 +3076,7 @@ class WaiterListView(LoginRequiredMixin, ListView):
         return qs.filter(name__icontains=q) if q else qs
 
 
+@method_decorator(require_permission('staff'), name='dispatch')
 class WaiterCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = Waiter
     fields = ['name', 'employee_id', 'phone']
@@ -2454,12 +3084,14 @@ class WaiterCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     success_url = reverse_lazy('waiter_list')
 
 
+@method_decorator(require_permission('staff'), name='dispatch')
 class WaiterDetailView(LoginRequiredMixin, DetailView):
     model = Waiter
     template_name = 'waiters/waiter_detail.html'
     context_object_name = 'waiter'
 
 
+@method_decorator(require_permission('staff'), name='dispatch')
 class WaiterUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = Waiter
     fields = ['name', 'employee_id', 'phone']
@@ -2467,6 +3099,7 @@ class WaiterUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     success_url = reverse_lazy('waiter_list')
 
 
+@method_decorator(require_permission('staff'), name='dispatch')
 class WaiterDeleteView(LoginRequiredMixin, DeleteView):
     model = Waiter
     success_url = reverse_lazy('waiter_list')
@@ -3309,6 +3942,7 @@ from .models import POSSettings, PrintStation
 from .forms import POSSettingsForm, PrintStationForm
 
 # --- Configuration Dashboard (Settings + Station List) ---
+@method_decorator(require_permission('settings'), name='dispatch')
 class ConfigurationView(LoginRequiredMixin, View):
     template_name = 'settings/configuration.html'
 
@@ -3342,6 +3976,7 @@ class ConfigurationView(LoginRequiredMixin, View):
         })
 
 # --- Print Station CRUD ---
+@method_decorator(require_permission('settings'), name='dispatch')
 class PrintStationCreateView(LoginRequiredMixin, CreateView):
     model = PrintStation
     form_class = PrintStationForm
@@ -3352,6 +3987,7 @@ class PrintStationCreateView(LoginRequiredMixin, CreateView):
         messages.success(self.request, "Print Station created.")
         return super().form_valid(form)
 
+@method_decorator(require_permission('settings'), name='dispatch')
 class PrintStationUpdateView(LoginRequiredMixin, UpdateView):
     model = PrintStation
     form_class = PrintStationForm
@@ -3362,6 +3998,7 @@ class PrintStationUpdateView(LoginRequiredMixin, UpdateView):
         messages.success(self.request, "Print Station updated.")
         return super().form_valid(form)
 
+@method_decorator(require_permission('settings'), name='dispatch')
 class PrintStationDeleteView(LoginRequiredMixin, DeleteView):
     model = PrintStation
     success_url = reverse_lazy('configuration')
@@ -3375,6 +4012,7 @@ from .forms import PaymentReceivedForm
 
 # ---------- PAYMENT RECEIVED CRUD ----------
 
+@method_decorator(require_permission('accounts'), name='dispatch')
 class PaymentReceivedListView(LoginRequiredMixin, ListView):
     model = PaymentReceived
     template_name = 'payments/payment_received_list.html'
@@ -3388,6 +4026,7 @@ class PaymentReceivedListView(LoginRequiredMixin, ListView):
             qs = qs.filter(customer__name__icontains=q) | qs.filter(supplier__name__icontains=q)
         return qs
 
+@method_decorator(require_permission('accounts'), name='dispatch')
 class PaymentReceivedCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = PaymentReceived
     form_class = PaymentReceivedForm
@@ -3399,6 +4038,7 @@ class PaymentReceivedCreateView(LoginRequiredMixin, AjaxableResponseMixin, Creat
         kwargs['request'] = self.request
         return kwargs
 
+@method_decorator(require_permission('accounts'), name='dispatch')
 class PaymentReceivedUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = PaymentReceived
     form_class = PaymentReceivedForm
@@ -3410,6 +4050,7 @@ class PaymentReceivedUpdateView(LoginRequiredMixin, AjaxableResponseMixin, Updat
         kwargs['request'] = self.request
         return kwargs
 
+@method_decorator(require_permission('accounts'), name='dispatch')
 class PaymentReceivedDeleteView(LoginRequiredMixin, DeleteView):
     model = PaymentReceived
     success_url = reverse_lazy('payment_received_list')

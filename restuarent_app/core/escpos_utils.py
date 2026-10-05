@@ -137,22 +137,21 @@ def print_bill(order):
         p.text("--------------------------------\n")
 
         # Subtotal is annotated on the order (assuming you did that in OrderListView)
-        subtotal = getattr(order, "subtotal", None)
-        if subtotal is None:
-            # Fallback: calculate manually
-            subtotal = sum(oi.quantity * oi.unit_price for oi in order.items.all())
+        subtotal = float(order.get_subtotal())
 
-        discount = order.discount or 0
-        tax_perc = order.tax_percentage or 0
-        service = order.service_charge or 0
+        discount = float(order.discount or 0)
+        service = float(order.service_charge or 0)
 
-        after_discount = max(subtotal - discount, 0)
-        tax_amount = (after_discount * tax_perc) / 100
-        grand_total = after_discount + tax_amount + service
+        grand_total = float(order.get_total())
 
         p.text(f"{'Subtotal:':<20}{subtotal:>10.2f}\n")
         p.text(f"{'Discount:':<20}{discount:>10.2f}\n")
-        p.text(f"{'Tax (' + str(tax_perc) + '%):':<20}{tax_amount:>10.2f}\n")
+        for tax_line in order.tax_display_lines():
+            if tax_line.tax_type == 'fixed':
+                tax_label = f"{tax_line.name} (fixed)"
+            else:
+                tax_label = f"{tax_line.name} ({float(tax_line.rate or 0):g}%)"
+            p.text(f"{tax_label + ':':<20}{float(tax_line.amount):>10.2f}\n")
         p.text(f"{'Service:':<20}{service:>10.2f}\n")
         p.text("--------------------------------\n")
         p.set(align="left", text_type="B")

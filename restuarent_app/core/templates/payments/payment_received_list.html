@@ -37,7 +37,7 @@
             <td>
                 {% if p.customer %}Customer{% else %}Supplier Refund{% endif %}
             </td>
-            <td class="text-success fw-bold">₨{{ p.amount }}</td>
+            <td class="text-success fw-bold">{{ CURRENCY_SYMBOL }}{{ p.amount }}</td>
             <td>
               {{ p.get_payment_method_display }}
               {% if p.bank_account %}<small class="text-muted">({{ p.bank_account.name }})</small>{% endif %}

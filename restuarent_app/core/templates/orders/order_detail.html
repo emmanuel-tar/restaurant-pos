@@ -309,11 +309,17 @@
           <td>
             {% if item.menu_item %}{{ item.menu_item.name }}
             {% else %}{{ item.deal.name }}{% endif %}
+            {# Modifiers picked for this line (Size, Add-ons, ...) #}
+            {% if item.modifiers.all %}
+              <div class="text-muted small">
+                {% for mod in item.modifiers.all %}+ {{ mod.name }}{% if mod.price %}({{ CURRENCY_SYMBOL }}{{ mod.price|floatformat:2 }}){% endif %}{% if not forloop.last %} {% endif %}{% endfor %}
+              </div>
+            {% endif %}
           </td>
           <td>{{ item.quantity }}</td>
-          <td>{{ item.unit_price|floatformat:2 }}</td>
-          <td>{{ item.quantity|floatformat:0 }} × {{ item.unit_price|floatformat:2 }}
-              = {{ item.quantity|floatformat:0|floatformat:2|stringformat:"s"|add:"" }}
+          <td>{{ item.effective_unit_price|floatformat:2 }}</td>
+          <td>{{ item.quantity }} &times; {{ item.effective_unit_price|floatformat:2 }}
+              = {{ item.line_total|floatformat:2 }}
           </td>
         </tr>
         {% endfor %}
@@ -324,9 +330,21 @@
 <table class="table order-summary">
   <tr><th>Subtotal:</th>      <td>{{ subtotal|floatformat:2 }}</td></tr>
   <tr><th>Discount:</th>      <td>{{ order.discount|floatformat:2 }}</td></tr>
-  <tr><th>Tax ({{ order.tax_percentage }}%):</th>
-      <td>{{ tax_amount|floatformat:2 }}</td></tr>
-  <tr><th>
+  {# One row per tax actually charged (VAT, WHT, Service Levy, ...). Old orders
+     without tax lines still show their single legacy tax row. #}
+  {% for tax in tax_lines %}
+  <tr>
+    <th>
+      {{ tax.name }}
+      {% if tax.tax_type == 'fixed' %}(fixed){% else %}({{ tax.rate|floatformat:"-2" }}%){% endif %}:
+    </th>
+    <td>{{ tax.amount|floatformat:2 }}</td>
+  </tr>
+  {% empty %}
+  <tr><th>Tax:</th><td>0.00</td></tr>
+  {% endfor %}
+  <tr>
+    <th>
           {% if order.isHomeDelivery == "yes" %}Delievry Charges:
         {% elif order.isHomeDelivery == "no" %}Service Charges:
         {% else %}&ndash;{% endif %}

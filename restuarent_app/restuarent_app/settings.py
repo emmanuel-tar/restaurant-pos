@@ -11,6 +11,12 @@ DEBUG = True
 ALLOWED_HOSTS = ['*', '192.168.0.2']
 
 RESTAURANT_NAME = "RestroPOS"
+
+# Country the POS operates in. One line controls currency symbol/code, number and
+# date formats, timezone, language and the standard VAT rate.
+# Options: NG (default), GH, CI, SN, KE, ZA, EG, AE, SA, GB, FR, DE, US, BR, IN, PK, ID, CN
+# Add new ones in core/countries.py.
+COUNTRY = 'NG'
 # Optionally:
 LOGO_PATH = os.path.join(BASE_DIR, "staticfiles", "images", "logo.png")
 
@@ -51,6 +57,8 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.app_branding',
+                'core.context_processors.localization',
+                'core.context_processors.navigation',
             ],
         },
     },
