@@ -384,3 +384,47 @@ class PaymentReceivedForm(forms.ModelForm):
         if commit:
             obj.save()
         return obj
+
+
+# ---------- Production (batch manufacturing) ----------
+from .models import ProductionRun, Recipe
+
+
+class ProductionRunForm(forms.ModelForm):
+    """Plan a batch: pick a recipe and the number of portions to make.
+
+    The raw-material sufficiency check happens server-side on submit, so a
+    short batch never half-deducts stock before the user confirms.
+    """
+    class Meta:
+        model = ProductionRun
+        fields = ['recipe', 'planned_qty', 'notes']
+        widgets = {
+            'recipe': forms.Select(attrs={'class': 'form-select', 'id': 'id_recipe'}),
+            'planned_qty': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0.01', 'id': 'id_planned_qty'}),
+            'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'Optional production notes'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Only recipes that produce a finished menu item are eligible for
+        # batch production — a recipe with no menu_item cannot stock anything.
+        self.fields['recipe'].queryset = (
+            Recipe.objects.select_related('menu_item').filter(menu_item__track_finished_stock=True)
+        )
+        self.fields['recipe'].empty_label = "— Select a recipe —"
+        self.fields['recipe'].required = True
+        self.fields['planned_qty'].required = True
+        self.fields['notes'].required = False
+
+
+class ProductionCompleteForm(forms.Form):
+    """Confirm a batch: how many portions were actually produced / lost."""
+    produced_qty = forms.DecimalField(
+        min_value=0.01, max_digits=10, decimal_places=2, required=True,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0.01', 'id': 'id_produced_qty'}),
+    )
+    wastage_qty = forms.DecimalField(
+        min_value=0, max_digits=10, decimal_places=2, required=False, initial=0,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'id': 'id_wastage_qty'}),
+    )

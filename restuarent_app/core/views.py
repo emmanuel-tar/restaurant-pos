@@ -25,6 +25,8 @@ from .models import (
     MenuItem, Deal,
     TaxRate, OrderTax, Modifier, ModifierGroup, OrderItemModifier,
     OrderHold,
+    ProductionRun,
+    Waiter,
 )
 
 from django.urls import reverse_lazy
@@ -255,7 +257,8 @@ class MenuItemListView(LoginRequiredMixin, ListView):
 @method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
     model = MenuItem
-    fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit']
+    fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit',
+              'track_finished_stock', 'finished_reorder_level']
     template_name = 'menu_items/menuitem_form.html'
     success_url = reverse_lazy('menuitem_list')
 
@@ -281,7 +284,8 @@ class MenuItemDetailView(LoginRequiredMixin, DetailView):
 @method_decorator(require_permission('menu'), name='dispatch')
 class MenuItemUpdateView(LoginRequiredMixin, AjaxableResponseMixin, UpdateView):
     model = MenuItem
-    fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit']
+    fields = ['category', 'name', 'description', 'price', 'food_panda_price', 'rank', 'is_available', 'image', 'station', 'weight', 'unit',
+              'track_finished_stock', 'finished_reorder_level']
     template_name = 'menu_items/menuitem_form.html'
     success_url = reverse_lazy('menuitem_list')
 
@@ -3052,14 +3056,155 @@ class RecipeDeleteView(LoginRequiredMixin, AjaxableResponseMixin, DeleteView):
     success_url = reverse_lazy('recipe_list')
 
 
-import json
-from django.urls import reverse_lazy
-from django.http import JsonResponse
-from django.views.generic import ListView, CreateView, DetailView, UpdateView, DeleteView
-from django.contrib.auth.mixins import LoginRequiredMixin
+# ---------- Production Runs (batch manufacturing) ----------
+from .forms import ProductionRunForm, ProductionCompleteForm
 
-from .models import Waiter
-from .views import AjaxableResponseMixin  # your existing mixin
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunListView(LoginRequiredMixin, ListView):
+    """Every batch-manufacturing event, newest first."""
+    model = ProductionRun
+    template_name = 'production_runs/production_run_list.html'
+    context_object_name = 'runs'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .select_related('recipe', 'recipe__menu_item', 'created_by')
+            .order_by('-created_at')
+        )
+        status = self.request.GET.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunCreateView(LoginRequiredMixin, AjaxableResponseMixin, CreateView):
+    """Plan a batch: recipe + portions. Raw materials are NOT touched yet."""
+    model = ProductionRun
+    form_class = ProductionRunForm
+    template_name = 'production_runs/production_run_form.html'
+    success_url = reverse_lazy('production_run_list')
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        return super().form_valid(form)
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunDetailView(LoginRequiredMixin, DetailView):
+    model = ProductionRun
+    template_name = 'production_runs/production_run_detail.html'
+    context_object_name = 'run'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        from .costing import recipe_breakdown
+        run = self.object
+        try:
+            ctx['breakdown'] = recipe_breakdown(run.recipe)
+        except Exception:
+            ctx['breakdown'] = None
+        # Raw-material ledger rows tied to this run (both raw consumption and
+        # the finished-goods credit).
+        ctx['transactions'] = list(
+            InventoryTransaction.objects
+            .filter(production_run=run)
+            .select_related('raw_material', 'menu_item')
+            .order_by('-id')
+        )
+        return ctx
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunCompleteView(LoginRequiredMixin, View):
+    """POST-only: confirm produced/wastage and actually move the stock."""
+    template_name = 'production_runs/production_run_complete.html'
+
+    def get(self, request, pk):
+        run = get_object_or_404(
+            ProductionRun.objects.select_related('recipe', 'recipe__menu_item'),
+            pk=pk,
+        )
+        if run.status != 'draft':
+            return HttpResponse(
+                f"Only a draft production run can be completed (this one is {run.get_status_display()}).",
+                status=400,
+            )
+        return render(request, self.template_name, {'run': run, 'form': ProductionCompleteForm()})
+
+    def post(self, request, pk):
+        run = get_object_or_404(
+            ProductionRun.objects.select_related('recipe', 'recipe__menu_item'),
+            pk=pk,
+        )
+        if run.status != 'draft':
+            return HttpResponse(
+                f"Only a draft production run can be completed (this one is {run.get_status_display()}).",
+                status=400,
+            )
+        form = ProductionCompleteForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name,
+                          {'run': run, 'form': form}, status=400)
+        try:
+            run.complete(
+                produced_qty=form.cleaned_data['produced_qty'],
+                wastage_qty=form.cleaned_data.get('wastage_qty') or 0,
+            )
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return render(request, self.template_name,
+                          {'run': run, 'form': form}, status=400)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'message': 'Production completed'})
+        messages.success(request, f"Production completed: {run.produced_qty} portions made.")
+        return redirect('production_run_detail', pk=run.pk)
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunCancelView(LoginRequiredMixin, View):
+    """Discard a draft, or reverse a completed run's stock movements."""
+    template_name = 'production_runs/production_run_confirm_cancel.html'
+
+    def get(self, request, pk):
+        # Reached by plain <a> links on the list/detail pages: show a confirm
+        # screen (POST actually performs the cancel), like DeleteView does.
+        run = get_object_or_404(ProductionRun, pk=pk)
+        return render(request, self.template_name, {'run': run})
+
+    def post(self, request, pk):
+        run = get_object_or_404(ProductionRun, pk=pk)
+        try:
+            run.cancel()
+        except ValueError as exc:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'error': str(exc)}, status=400)
+            messages.error(request, str(exc))
+            return redirect('production_run_detail', pk=run.pk)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'message': 'Production run cancelled'})
+        messages.success(request, 'Production run cancelled and stock reversed.')
+        return redirect('production_run_list')
+
+
+@method_decorator(require_permission('inventory'), name='dispatch')
+class ProductionRunDeleteView(LoginRequiredMixin, DeleteView):
+    model = ProductionRun
+    success_url = reverse_lazy('production_run_list')
+    template_name = 'production_runs/production_run_confirm_delete.html'
+
+    def form_valid(self, form):
+        # Django 4.2 routes POST through FormMixin: delete() overrides are
+        # skipped, so the row-by-row stock reversal must live here.
+        self.object = self.get_object()
+        self.object.delete()  # override returns stock row-by-row
+        if self.request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'message': 'Deleted'})
+        return redirect(self.get_success_url())
+
 
 # — Waiters CRUD —
 

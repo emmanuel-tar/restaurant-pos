@@ -16,7 +16,26 @@
     <link rel="stylesheet" href="{% static 'css/reports.css' %}" />
     <link rel="stylesheet" href="{% static 'css/app-shell.css' %}" />
 
+    {# Fallback layout when the Bootstrap CDN is unreachable (offline till, #}
+    {# blocked CDN): the login card and sidebar shell must still render. #}
+    <style>
+      .login-bg { min-height: 100vh; }
+      .login-bg .login-container { margin: 0 auto; }
+      .app-shell { display: flex; min-height: 100vh; }
+      .app-main { flex: 1; min-width: 0; }
+      .app-content { padding: 1rem; }
+    </style>
+
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    {# Every inline script in this project assumes jQuery ($). When the CDN #}
+    {# is unreachable the page must degrade loudly instead of blanking on a #}
+    {# "$ is not defined" error halfway through rendering. #}
+    <script>
+      window.__POS_NO_JQUERY__ = (typeof window.jQuery === 'undefined');
+      if (window.__POS_NO_JQUERY__) {
+        console.warn('POS: jQuery CDN unreachable — AJAX forms disabled.');
+      }
+    </script>
     <script src="{% static 'js/alert.js' %}"></script>
 
     {% block extra_head %}{% endblock %}

@@ -158,6 +158,8 @@ from .views import (
     RecipeListView,
     RecipeCreateView, RecipeDetailView,
     RecipeUpdateView, RecipeDeleteView,
+    ProductionRunListView, ProductionRunCreateView, ProductionRunDetailView,
+    ProductionRunCompleteView, ProductionRunCancelView, ProductionRunDeleteView,
 )
 
 urlpatterns += [
@@ -167,6 +169,14 @@ urlpatterns += [
     path('recipes/<int:pk>/',RecipeDetailView.as_view(), name='recipe_detail'),
     path('recipes/<int:pk>/edit/',  RecipeUpdateView.as_view(), name='recipe_edit'),
     path('recipes/<int:pk>/delete/',RecipeDeleteView.as_view(), name='recipe_delete'),
+
+    # Production runs (batch manufacturing)
+    path('production/',                    ProductionRunListView.as_view(),    name='production_run_list'),
+    path('production/new/',                ProductionRunCreateView.as_view(),  name='production_run_create'),
+    path('production/<int:pk>/',           ProductionRunDetailView.as_view(),  name='production_run_detail'),
+    path('production/<int:pk>/complete/', ProductionRunCompleteView.as_view(), name='production_run_complete'),
+    path('production/<int:pk>/cancel/',    ProductionRunCancelView.as_view(),   name='production_run_cancel'),
+    path('production/<int:pk>/delete/',    ProductionRunDeleteView.as_view(),   name='production_run_delete'),
 ]
 
 from .views import (

@@ -198,6 +198,19 @@ class MenuItem(models.Model):
 
     # Inventory tracking fields
     weight = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True, help_text="Weight/quantity of the item")
+
+    # Finished-goods stock for batch-produced items. When `track_finished_stock`
+    # is on, a ProductionRun adds portions here and each sale decrements them,
+    # instead of exploding the recipe into raw materials at sale time. Items
+    # with the flag off keep the existing make-to-order raw-deduction behaviour.
+    track_finished_stock = models.BooleanField(
+        default=False,
+        help_text="Produce this item in batches ahead of time and track ready portions.")
+    finished_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+        help_text="Ready-to-sell portions on hand (increased by production, decreased by sales).")
+    finished_reorder_level = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Warn when ready portions fall to (or below) this level.")
     
     UNIT_CHOICES = [
         ('kg', 'Kilogram'),
@@ -213,6 +226,19 @@ class MenuItem(models.Model):
 
     # Allow overriding station per item
     station = models.ForeignKey(PrintStation, on_delete=models.SET_NULL, null=True, blank=True, related_name="menu_items")
+
+    @property
+    def is_finished_low_stock(self):
+        """True when a tracked item has fallen to (or below) its ready-stock level."""
+        if not self.track_finished_stock:
+            return False
+        return (self.finished_stock or 0) <= (self.finished_reorder_level or 0)
+
+    @property
+    def is_finished_out_of_stock(self):
+        if not self.track_finished_stock:
+            return False
+        return (self.finished_stock or 0) <= 0
 
     def __str__(self):
         return f"{self.name} â€“ {self.category.name}"
@@ -230,6 +256,55 @@ class MenuItem(models.Model):
         if self.weight and self.unit:
             return f"{self.weight} {self.get_unit_display()}"
         return None
+
+    # ---------- Finished-goods stock helpers ----------
+    @property
+    def finished_stock_status(self):
+        if self.is_finished_out_of_stock:
+            return 'out'
+        if self.is_finished_low_stock:
+            return 'low'
+        return 'ok'
+
+    @property
+    def max_producible(self):
+        """How many portions the kitchen could produce right now from raw stock.
+
+        Returns None for untracked items or items without a recipe.
+        """
+        if not self.track_finished_stock:
+            return None
+        try:
+            recipe = self.recipe
+        except Exception:
+            return None
+        if recipe is None:
+            return None
+        from .costing import usage_map
+        try:
+            per_portion = usage_map(recipe, portions=1)
+        except Exception:
+            return None
+        if not per_portion:
+            return None
+        from decimal import Decimal
+        from .models import RawMaterial
+        best = None
+        for rm_id, need in per_portion.items():
+            if not need or need <= 0:
+                continue
+            try:
+                rm = RawMaterial.objects.get(pk=rm_id)
+            except RawMaterial.DoesNotExist:
+                return Decimal('0')
+            avail = rm.current_stock or Decimal('0')
+            if avail <= 0:
+                return Decimal('0')
+            possible = avail / need
+            best = possible if best is None else min(best, possible)
+        if best is None:
+            return None
+        return best.quantize(Decimal('1')) if best >= 0 else Decimal('0')
     
 
 # ---------- Deals (New) ----------
@@ -623,13 +698,17 @@ class OrderItem(models.Model):
         return ' + '.join(m.name for m in self.modifiers.all())
 
     def update_inventory_usage(self):
-        """Deduct raw materials for this line via the standard costing engine.
+        """Deduct stock for this line.
 
-        Uses costing.usage_map() so yield, wastage, unit conversion and nested
-        sub-recipes are honoured. Deals explode into their component menu items.
-        Quantity stored on the transaction is in each material's STOCK unit.
+        Tracked items (track_finished_stock=True) consume finished portions:
+        one 'out' finished-goods ledger row, which decrements finished_stock.
+        Everything else keeps the legacy behaviour — the recipe explodes into
+        raw materials via costing.usage_map(). Deals explode into their
+        component menu items first; each component is routed the same way.
+        Quantity on raw rows is in each material's STOCK unit.
         """
         from .costing import usage_map
+        from decimal import Decimal
         targets = []
         if self.menu_item_id:
             targets.append((self.menu_item, self.quantity or 0))
@@ -644,6 +723,18 @@ class OrderItem(models.Model):
         for menu_item, qty in targets:
             if not menu_item or not qty:
                 continue
+            if getattr(menu_item, 'track_finished_stock', False):
+                used = Decimal(str(qty)).quantize(Decimal('0.01'))
+                if not used:
+                    continue
+                InventoryTransaction.objects.create(
+                    menu_item=menu_item,
+                    transaction_type='out',
+                    quantity=used,
+                    order_item=self,
+                    notes=f"Sold {menu_item.name} (Order #{self.order.number})",
+                )
+                continue
             try:
                 recipe = menu_item.recipe
             except Exception:
@@ -654,7 +745,6 @@ class OrderItem(models.Model):
                 usage = usage_map(recipe, portions=qty)
             except Exception:
                 continue
-            from decimal import Decimal
             for rm_id, need in usage.items():
                 try:
                     rm = RawMaterial.objects.get(pk=rm_id)
@@ -1204,6 +1294,124 @@ class RecipeSubRecipe(models.Model):
     def __str__(self):
         return f"{self.quantity} portion(s) of {self.sub_recipe.menu_item.name}"
 
+
+class ProductionRun(models.Model):
+    """One batch-manufacturing event: recipe in, finished portions out.
+
+    Planned first (draft) while the kitchen checks raw-material sufficiency,
+    then completed to deduct raws and add finished portions atomically, or
+    cancelled to discard a draft. A completed run deletes line-by-line (not
+    via QuerySet.delete()) so each InventoryTransaction.delete() returns the
+    stock it moved; cancelling a completed run therefore reverses both the raw
+    consumption and the finished portions.
+    """
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    recipe = models.ForeignKey(Recipe, on_delete=models.PROTECT,
+                               related_name='production_runs')
+    planned_qty = models.DecimalField(max_digits=10, decimal_places=2,
+        help_text="Portions to produce.")
+    produced_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+        help_text="Portions actually produced (filled on completion).")
+    wastage_qty = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+        help_text="Portions lost in production (recorded for reporting).")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                   null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Production #{self.pk or '?'}: {self.planned_qty} x {self.recipe}"
+
+    @property
+    def menu_item(self):
+        return self.recipe.menu_item
+
+    @property
+    def net_produced(self):
+        """Finished portions actually added to stock: produced − wastage."""
+        from decimal import Decimal
+        return (Decimal(str(self.produced_qty or 0))
+                - Decimal(str(self.wastage_qty or 0))).quantize(Decimal('0.01'))
+
+    def shortage(self):
+        """Raw materials short of producing planned_qty, as {rm: (need, have)}."""
+        from .costing import usage_map
+        short = {}
+        try:
+            usage = usage_map(self.recipe, portions=self.planned_qty)
+        except Exception:
+            return short
+        for rm_id, need in usage.items():
+            try:
+                rm = RawMaterial.objects.get(pk=rm_id)
+            except RawMaterial.DoesNotExist:
+                continue
+            have = rm.current_stock or Decimal('0')
+            if need > have:
+                short[rm] = (need, have)
+        return short
+
+    def complete(self, produced_qty=None, wastage_qty=None):
+        """Deduct raws, credit finished stock. Raises ValueError when short."""
+        from django.db.models import F
+        from django.utils import timezone as _tz
+        from .costing import produce_portions
+        if self.status == 'completed':
+            return
+        if self.status == 'cancelled':
+            raise ValueError('Cannot complete a cancelled production run.')
+        produced = Decimal(str(produced_qty if produced_qty is not None else self.planned_qty))
+        wastage = Decimal(str(wastage_qty or 0))
+        if produced <= 0:
+            raise ValueError('Produced quantity must be greater than zero.')
+        if wastage < 0:
+            raise ValueError('Wastage cannot be negative.')
+        if wastage > produced:
+            raise ValueError('Wastage cannot exceed the produced quantity.')
+        # produce_portions() checks sufficiency first and raises before writing
+        # anything, so a short batch leaves every stock level untouched.
+        produce_portions(self.recipe, portions=produced, production_run=self)
+        net = produced - wastage
+        if net > 0:
+            # One finished-goods ledger row: the same reversal machinery as raw
+            # rows (delete() credits it back) also powers cancel() below.
+            InventoryTransaction.objects.create(
+                menu_item=self.recipe.menu_item,
+                transaction_type='in',
+                quantity=net.quantize(Decimal('0.01')),
+                production_run=self,
+                notes=f"Produced {net} x {self.recipe.menu_item.name} (Run #{self.pk or 'new'})",
+            )
+        self.produced_qty = produced
+        self.wastage_qty = wastage
+        self.status = 'completed'
+        self.completed_at = _tz.now()
+        self.save(update_fields=['produced_qty', 'wastage_qty', 'status', 'completed_at'])
+
+    def cancel(self):
+        """Discard a draft, or reverse a completed run's stock movements."""
+        if self.status == 'cancelled':
+            return
+        if self.status == 'completed':
+            for txn in list(InventoryTransaction.objects.filter(production_run=self)):
+                txn.delete()
+        self.status = 'cancelled'
+        self.save(update_fields=['status'])
+
+    def delete(self, *args, **kwargs):
+        for txn in list(InventoryTransaction.objects.filter(production_run=self)):
+            txn.delete()
+        return super().delete(*args, **kwargs)
+
 class InventoryTransaction(models.Model):
     TRANSACTION_TYPES = [
         ('in', 'Stock In'),
@@ -1224,6 +1432,25 @@ class InventoryTransaction(models.Model):
     order_item          = models.ForeignKey(OrderItem,
                                             on_delete=models.SET_NULL,
                                             null=True, blank=True)
+    # finished-goods links: completed ProductionRuns consume raws (raw_material
+    # set) and book finished portions (menu_item set) with the same row shape,
+    # so the whole raw->finished audit trail lives in one ledger.
+    menu_item           = models.ForeignKey(MenuItem,
+                                            on_delete=models.CASCADE,
+                                            related_name='finished_transactions',
+                                            null=True, blank=True)
+    production_run      = models.ForeignKey(ProductionRun,
+                                            on_delete=models.SET_NULL,
+                                            null=True, blank=True)
+
+    @staticmethod
+    def _finished_delta(transaction_type, qty):
+        """Finished-stock movement for a row: 'in' adds, 'out' removes."""
+        if transaction_type == 'in':
+            return qty
+        if transaction_type == 'out':
+            return -qty
+        return Decimal('0')
 
     def save(self, *args, **kwargs):
         from decimal import Decimal
@@ -1231,27 +1458,57 @@ class InventoryTransaction(models.Model):
         super().save(*args, **kwargs)
         # Maintain current_stock atomically so parallel sales cannot lose updates.
         qty = self.quantity or Decimal('0')
-        if self.transaction_type == 'in':
-            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
-        elif self.transaction_type in ['out']:
-            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') - qty)
-        elif self.transaction_type == 'return':
-            RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
+        if self.raw_material_id:
+            if self.transaction_type == 'in':
+                RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
+            elif self.transaction_type in ['out']:
+                RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') - qty)
+            elif self.transaction_type == 'return':
+                RawMaterial.objects.filter(pk=self.raw_material_id).update(current_stock=F('current_stock') + qty)
+        if self.menu_item_id:
+            delta = self._finished_delta(self.transaction_type, qty)
+            if delta:
+                MenuItem.objects.filter(pk=self.menu_item_id).update(finished_stock=F('finished_stock') + delta)
 
     def delete(self, *args, **kwargs):
         from decimal import Decimal
         from django.db.models import F
         qty = self.quantity or Decimal('0')
         pk = self.raw_material_id
+        mi_pk = self.menu_item_id
+        delta = self._finished_delta(self.transaction_type, qty) if mi_pk else Decimal('0')
         super().delete(*args, **kwargs)
         # Deleting an 'out' row returns the stock (used by order-edit reversal).
-        if self.transaction_type == 'out':
-            RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') + qty)
-        elif self.transaction_type in ('in', 'return'):
-            RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') - qty)
+        if pk:
+            if self.transaction_type == 'out':
+                RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') + qty)
+            elif self.transaction_type in ('in', 'return'):
+                RawMaterial.objects.filter(pk=pk).update(current_stock=F('current_stock') - qty)
+        # Deleting a finished-goods row reverses it the same way: an 'in' row's
+        # portions come back off, an 'out' row's portions go back on.
+        if delta:
+            MenuItem.objects.filter(pk=mi_pk).update(finished_stock=F('finished_stock') - delta)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.menu_item_id and self.raw_material_id:
+            raise ValidationError('A transaction tracks either a raw material or a finished item, not both.')
+
+    def finished_label(self):
+        """Human-readable label that works for both raw and finished rows."""
+        if self.menu_item_id:
+            try:
+                label = self.menu_item.name
+            except Exception:
+                label = f"menu item #{self.menu_item_id}"
+            return f"{label}: {self.quantity} portions"
+        try:
+            return f"{self.raw_material.name}: {self.quantity} {self.raw_material.unit}"
+        except Exception:
+            return f"raw material #{self.raw_material_id}: {self.quantity}"
 
     def __str__(self):
-        return f"{self.get_transaction_type_display()} â€“ {self.raw_material.name}: {self.quantity} {self.raw_material.unit}"
+        return f"{self.get_transaction_type_display()} - {self.finished_label()}"
 
 
 from django.db.models.signals import post_save

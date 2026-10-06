@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Complete Production Run #{{ run.pk }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-industry"></i> Complete Production Run #{{ run.pk }}</h1>
+  <a href="{% url 'production_run_detail' run.pk %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <div class="card-body">
+    <p>
+      <strong>Recipe:</strong> {{ run.recipe.name|default:"—" }}
+      &nbsp; <strong>Menu item:</strong> {{ run.recipe.menu_item.name }}
+    </p>
+    <p><strong>Planned portions:</strong> {{ run.planned_qty }}</p>
+    {% if messages %}
+      <ul class="mb-2">
+        {% for message in messages %}<li class="text-danger">{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_produced_qty">Portions actually produced</label>
+          {{ form.produced_qty }}
+          {% if form.produced_qty.errors %}<div class="text-danger small">{{ form.produced_qty.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_wastage_qty">Portions lost (wastage)</label>
+          {{ form.wastage_qty }}
+          {% if form.wastage_qty.errors %}<div class="text-danger small">{{ form.wastage_qty.errors }}</div>{% endif %}
+        </div>
+      </div>
+      <div class="small-muted mt-2">
+        Raw materials are deducted for the produced quantity; the net (produced − wastage)
+        is added to {{ run.recipe.menu_item.name }} finished stock.
+      </div>
+      <div class="mt-3">
+        <button type="submit" class="btn btn-success"><i class="fa fa-play"></i> Complete &amp; move stock</button>
+        <a href="{% url 'production_run_detail' run.pk %}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -7,7 +7,7 @@ from django.contrib import admin
 from .models import (
     POSSettings, PrintStation, TokenSequence, Category, MenuItem,
     TaxRate, OrderTax, ModifierGroup, Modifier, OrderItemModifier,
-    RawMaterial,
+    RawMaterial, ProductionRun, InventoryTransaction,
 )
 
 
@@ -92,8 +92,36 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(MenuItem)
 class MenuItemAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'station', 'price')
-    list_filter = ('category', 'station')
+    list_display = ('name', 'category', 'station', 'price',
+                    'track_finished_stock', 'finished_stock', 'finished_reorder_level')
+    list_filter = ('category', 'station', 'track_finished_stock')
+    fieldsets = (
+        (None, {'fields': ('category', 'name', 'description', 'price',
+                           'food_panda_price', 'rank', 'is_available',
+                           'image', 'station', 'weight', 'unit')}),
+        ('Batch production', {'fields': ('track_finished_stock', 'finished_reorder_level'),
+                              'description': 'Finished portions are increased by completed '
+                                             'production runs and decreased by sales.'}),
+    )
+
+
+@admin.register(ProductionRun)
+class ProductionRunAdmin(admin.ModelAdmin):
+    list_display = ('id', 'recipe', 'planned_qty', 'produced_qty',
+                    'wastage_qty', 'status', 'created_by', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('recipe__menu_item__name', 'recipe__name', 'notes')
+    ordering = ('-created_at',)
+    readonly_fields = ('produced_qty', 'completed_at')
+
+
+@admin.register(InventoryTransaction)
+class InventoryTransactionAdmin(admin.ModelAdmin):
+    list_display = ('id', 'transaction_type', 'raw_material', 'menu_item',
+                    'quantity', 'production_run', 'order_item', 'date')
+    list_filter = ('transaction_type', 'date')
+    search_fields = ('raw_material__name', 'menu_item__name', 'notes')
+    ordering = ('-timestamp',)
 
 
 @admin.register(Unit)

@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Cancel Production Run #{{ run.pk }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-industry"></i> Cancel Production Run #{{ run.pk }}</h1>
+  <a href="{% url 'production_run_detail' run.pk %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <div class="card-body">
+    {% if run.status == 'completed' %}
+      <p>
+        This run is <strong>completed</strong>. Cancelling deletes every stock movement
+        it created, so the raw materials are credited back and the
+        <strong>{{ run.net_produced }}</strong> finished portion(s) of
+        {{ run.recipe.menu_item.name }} are removed again.
+      </p>
+    {% else %}
+      <p>
+        This run is a <strong>draft</strong> and has not moved any stock.
+        Cancelling just discards the plan.
+      </p>
+    {% endif %}
+    <p class="mb-0"><strong>Recipe:</strong> {{ run.recipe.name|default:"—" }} &nbsp; <strong>Planned:</strong> {{ run.planned_qty }}</p>
+    <form method="post" action="{% url 'production_run_cancel' run.pk %}" class="mt-3">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-warning"><i class="fa fa-ban"></i> Confirm cancel</button>
+      <a href="{% url 'production_run_detail' run.pk %}" class="btn btn-outline-secondary">Keep run</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

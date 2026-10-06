@@ -35,4 +35,25 @@ jobs:
 
       - name: Run test suite
         working-directory: restuarent_app
-        run: python manage.py test --verbosity=2
+        run: |
+          status=0
+          python manage.py test --verbosity=2 > test.log 2>&1 || status=$?
+          cat test.log
+
+          # Publish the result on the run summary so it is readable without
+          # signing in just to open the job logs.
+          count=$(grep -oE 'Ran [0-9]+ tests' test.log | grep -oE '[0-9]+' || true)
+          {
+            echo "### Test suite"
+            echo "Tests executed: ${count:-0}"
+            echo '```'
+            grep -E '^(Ran [0-9]+ tests|OK|FAILED)' test.log | tail -n 5 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A suite that discovers nothing exits 0 - never let that pass silently.
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "::error::No tests were discovered - the suite would silently pass."
+            exit 1
+          fi
+          exit $status

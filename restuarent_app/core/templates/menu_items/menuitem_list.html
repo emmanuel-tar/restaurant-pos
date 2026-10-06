@@ -17,7 +17,7 @@
   <thead>
     <tr>
       <th>Image</th><th>Name</th><th>Category</th>
-      <th>Price</th><th>Food Panda Price</th><th>Weight</th><th>Rank</th><th>Avail.</th><th>Actions</th>
+      <th>Price</th><th>Food Panda Price</th><th>Weight</th><th>Rank</th><th>Avail.</th><th>Ready</th><th>Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -38,6 +38,16 @@
       <td>{{ item.rank|default:"" }}</td>
       <td>{{ item.is_available|yesno:'Yes,No' }}</td>
       <td>
+        {% if item.track_finished_stock %}
+          {{ item.finished_stock }}
+          {% if item.is_finished_out_of_stock %}
+            <span class="badge bg-danger">OUT</span>
+          {% elif item.is_finished_low_stock %}
+            <span class="badge bg-warning">LOW</span>
+          {% endif %}
+        {% else %}—{% endif %}
+      </td>
+      <td>
         {% comment %} <a href="{% url 'menuitem_detail' item.pk %}">
           <i class="fa fa-eye"></i>
         </a> {% endcomment %}
@@ -50,7 +60,7 @@
       </td>
     </tr>
     {% empty %}
-    <tr><td colspan="9">No items.</td></tr>
+    <tr><td colspan="10">No items.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}Production Runs{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-industry"></i> Production Runs</h1>
+  <a href="{% url 'production_run_create' %}" class="btn"><i class="fa fa-plus"></i> New Batch</a>
+</div>
+
+<form class="search-bar">
+  <select name="status" id="status-filter">
+    <option value="">All statuses</option>
+    <option value="draft">Draft</option>
+    <option value="completed">Completed</option>
+    <option value="cancelled">Cancelled</option>
+  </select>
+  <button type="submit"><i class="fa fa-filter"></i> Filter</button>
+</form>
+
+<table class="table">
+  <thead><tr>
+    <th>Date</th><th>Recipe</th><th>Menu Item</th>
+    <th class="text-end">Planned</th><th class="text-end">Produced</th>
+    <th class="text-end">Wastage</th><th>Status</th><th>Actions</th>
+  </tr></thead>
+  <tbody>
+    {% for r in runs %}
+    <tr id="production-{{ r.pk }}">
+      <td>{{ r.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ r.recipe.name|default:"—" }}</td>
+      <td>{{ r.recipe.menu_item.name }}</td>
+      <td class="text-end">{{ r.planned_qty }}</td>
+      <td class="text-end">{{ r.produced_qty }}</td>
+      <td class="text-end">{{ r.wastage_qty }}</td>
+      <td>
+        <span class="badge {% if r.status == 'completed' %}bg-success{% elif r.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
+          {{ r.get_status_display }}
+        </span>
+      </td>
+      <td>
+        <a href="{% url 'production_run_detail' r.pk %}"><i class="fa fa-eye"></i></a>
+        {% if r.status == 'draft' %}
+          <a href="{% url 'production_run_complete' r.pk %}"><i class="fa fa-play"></i></a>
+          <a href="{% url 'production_run_cancel' r.pk %}" class="btn-cancel"><i class="fa fa-ban"></i></a>
+          <button class="btn-delete" data-url="{% url 'production_run_delete' r.pk %}"><i class="fa fa-trash"></i></button>
+        {% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8">No production runs yet. <a href="{% url 'production_run_create' %}">Plan your first batch</a>.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  function gc(n){let m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():'';}
+  $.ajaxSetup({ headers:{ 'X-CSRFToken': gc('csrftoken') } });
+  // Delete stays an inline AJAX POST; cancel opens the confirm page (GET)
+  // so completed runs show the stock-reversal warning before anything moves.
+  $('.btn-delete').click(function(e){
+    e.preventDefault();
+    const url=$(this).data('url'), row='#production-'+url.split('/').slice(-2)[0];
+    if(confirm('Delete this production run? Stock will be reversed if it was completed.')){
+      $.post(url,{},()=>{showAlert('success','Deleted');$(row).remove();});
+    }
+  });
+</script>
+{% endblock %}

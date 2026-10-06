@@ -8,6 +8,22 @@
 <p><strong>Weight/Quantity:</strong> {{ item.get_weight_display|default:"N/A" }}</p>
 <p><strong>Rank:</strong> {{ item.rank|default:"0" }}</p>
 <p><strong>Available:</strong> {{ item.is_available|yesno:'Yes,No' }}</p>
+{% if item.track_finished_stock %}
+<p><strong>Finished stock:</strong> {{ item.finished_stock }} portion(s)
+  <span class="small-muted">(reorder when ≤ {{ item.finished_reorder_level }})</span>
+  {% if item.is_finished_out_of_stock %}
+    <span class="badge bg-danger">OUT OF STOCK</span>
+  {% elif item.is_finished_low_stock %}
+    <span class="badge bg-warning">LOW</span>
+  {% else %}
+    <span class="badge bg-success">OK</span>
+  {% endif %}
+</p>
+{% if item.max_producible != None %}
+<p><strong>Producible now:</strong> ~{{ item.max_producible }} portion(s) from raw stock
+  — <a href="{% url 'production_run_create' %}">plan a batch</a></p>
+{% endif %}
+{% endif %}
 <p>{{ item.description }}</p>
 
 <div class="card" style="padding:.75rem 1rem;margin:.75rem 0;max-width:640px;">

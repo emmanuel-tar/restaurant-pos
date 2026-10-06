@@ -236,3 +236,82 @@ def refresh_cost(mi, save=True):
     return cost
 
 
+def check_producible(recipe, portions):
+    """Raw-material sufficiency for producing `portions` of `recipe`.
+
+    Returns a list of ``{'raw_material', 'need', 'have', 'short_by'}`` rows
+    (in each material's STOCK unit) for materials where need exceeds stock —
+    empty means the batch can be produced.
+    """
+    from .models import RawMaterial
+    shortages = []
+    try:
+        usage = usage_map(recipe, portions=portions)
+    except Exception:
+        return shortages
+    for rm_id, need in usage.items():
+        try:
+            rm = RawMaterial.objects.get(pk=rm_id)
+        except RawMaterial.DoesNotExist:
+            continue
+        try:
+            need_q = (need or Decimal('0')).quantize(Decimal('0.01'))
+        except Exception:
+            need_q = Decimal('0')
+        have = rm.current_stock or Decimal('0')
+        if need_q > have:
+            shortages.append({
+                'raw_material': rm, 'need': need_q, 'have': have,
+                'short_by': need_q - have,
+            })
+    return shortages
+
+
+def produce_portions(recipe, portions, production_run=None):
+    """Consume raw materials to manufacture `portions` of a recipe's output.
+
+    The single engine behind ProductionRun.complete(): flattens the recipe
+    with usage_map() (yield, wastage, sub-recipes, unit conversion), checks
+    sufficiency up front so a batch never half-deducts, then writes one 'out'
+    InventoryTransaction per material in its STOCK unit, linked to
+    `production_run` for audit and reversal.
+
+    Raises ValueError listing any shortages.
+    """
+    from django.db import transaction as _txn
+    from .models import InventoryTransaction
+    try:
+        portions = Decimal(str(portions or 0))
+    except Exception:
+        portions = Decimal('0')
+    if portions <= 0:
+        raise ValueError('Quantity to produce must be greater than zero.')
+    try:
+        menu_name = recipe.menu_item.name
+    except Exception:
+        menu_name = 'item'
+    shortages = check_producible(recipe, portions)
+    if shortages:
+        bits = ', '.join(
+            f"{s['raw_material'].name}: need {s['need']}, have {s['have']}"
+            for s in shortages
+        )
+        raise ValueError(f'Insufficient stock to produce {portions} x {menu_name} — {bits}.')
+    usage = usage_map(recipe, portions=portions)
+    with _txn.atomic():
+        for rm_id, need in usage.items():
+            from .models import RawMaterial
+            rm = RawMaterial.objects.get(pk=rm_id)
+            used = (need or Decimal('0')).quantize(Decimal('0.01'))
+            if not used:
+                continue
+            InventoryTransaction.objects.create(
+                raw_material=rm,
+                transaction_type='out',
+                quantity=used,
+                production_run=production_run,
+                notes=f"Production: {portions} x {menu_name}",
+            )
+    return usage
+
+

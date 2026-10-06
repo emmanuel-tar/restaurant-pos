@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Delete Production Run #{{ object.pk }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-industry"></i> Delete Production Run #{{ object.pk }}</h1>
+  <a href="{% url 'production_run_detail' object.pk %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <div class="card-body">
+    {% if object.status == 'completed' %}
+      <p>
+        This run is <strong>completed</strong>. Deleting it deletes every stock movement
+        it created — raw materials are credited back and the finished portions are
+        removed from {{ object.recipe.menu_item.name }} stock.
+      </p>
+    {% else %}
+      <p>This {{ object.get_status_display|lower }} run has not moved any stock; deleting it just removes the record.</p>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger"><i class="fa fa-trash"></i> Confirm delete</button>
+      <a href="{% url 'production_run_detail' object.pk %}" class="btn btn-outline-secondary">Keep run</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

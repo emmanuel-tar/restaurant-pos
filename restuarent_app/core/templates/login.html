@@ -1,20 +1,21 @@
 {% extends 'base.html' %} {% load static %}
 {% block title %}Login | {{ RESTAURANT_NAME }}{% endblock %}
 
-{# The login screen is a single centred card, so it opts out of the
-   sidebar/topbar shell entirely. #}
-{% block shell %}{% endblock %}
-
-{% block content %}
-
-
+{# The login screen is a single centred card, so it replaces the #}
+{# sidebar/topbar shell with its own full-page layout. The form lives #}
+{# inside the shell block (not a separate content block) so it can never #}
+{# be dropped when the shell is overridden. #}
+{% block shell %}
 <div class="login-bg">
   <div class="login-container">
     <form method="post" class="login-form">
       {% csrf_token %}
       <div class="login-header">
-        <img src="{% static 'images/logo.png' %}" alt="" class="logo">
-        <h2><i class="fa fa-utensils"></i> Restaurant POS</h2>
+        {% comment %}The logo is optional: a missing file must never break the
+        login screen with a broken-image icon.{% endcomment %}
+        <img src="{% static 'images/logo.png' %}" alt="" class="logo"
+             onerror="this.style.display='none'">
+        <h2><i class="fa fa-utensils"></i> {{ RESTAURANT_NAME|default:'Restaurant POS' }}</h2>
       </div>
       {% if error %}
         <div class="error-message"><i class="fa fa-exclamation-circle"></i> {{ error }}</div>

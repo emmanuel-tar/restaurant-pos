@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}{% if view.object %}Cancel{% else %}New Production Run{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fa fa-industry"></i> {% if view.object %}Cancel{% else %}New Production Run{% endif %}</h1>
+  <a href="{% url 'production_run_list' %}" class="btn"><i class="fa fa-arrow-left"></i> Back</a>
+</div>
+
+<form id="pr-form" method="post">
+  {% csrf_token %}
+  <div class="card" style="max-width:720px;">
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label">Recipe</label>
+        {{ form.recipe }}
+        <div class="small-muted">Only recipes whose menu item has <strong>Track finished stock</strong> enabled are listed.</div>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Portions to produce</label>
+          {{ form.planned_qty }}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Notes</label>
+          {{ form.notes }}
+        </div>
+      </div>
+      <div id="sufficiency" class="mt-3" style="display:none;"></div>
+    </div>
+    <div class="card-footer">
+      <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Save as Draft</button>
+      <a href="{% url 'production_run_list' %}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </div>
+</form>
+
+<script>
+  function gc(n){let m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():'';}
+  $.ajaxSetup({ headers:{ 'X-CSRFToken': gc('csrftoken') } });
+
+  $('#pr-form').submit(function(e){
+    e.preventDefault();
+    const fd = new FormData(this);
+    $.ajax({url:window.location.href, method:'POST', data:fd, processData:false, contentType:false,
+      success:()=>{showAlert('success','Draft saved'); setTimeout(()=>window.location.href="{% url 'production_run_list' %}",500);},
+      error:(xr)=>{ let m='Failed'; try{m=JSON.stringify(xr.responseJSON)}catch(e){} showAlert('error',m); }
+    });
+  });
+</script>
+{% endblock %}
